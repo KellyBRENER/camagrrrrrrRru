@@ -31,6 +31,11 @@ class AuthController {
                 echo json_encode(['success' => false, 'message' => 'Veuillez remplir tous les champs.']);
                 exit;
             }
+            // Dans AuthController.php, méthode register()
+            if (strlen($password) < 8 || !preg_match("#[0-9]+#", $password) || !preg_match("#[a-zA-Z]+#", $password)) {
+                echo json_encode(['success' => false, 'message' => 'Le mot de passe doit contenir 8 caractères, un chiffre et une lettre.']);
+                exit;
+            }
 
             // Tentative de création
             $success = $this->userModel->create($username, $email, $password);

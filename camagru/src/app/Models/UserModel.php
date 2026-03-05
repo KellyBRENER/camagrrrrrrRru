@@ -7,21 +7,26 @@ class UserModel {
     }
 
     public function create($username, $email, $password) {
-        // ON HASHE TOUJOURS LE MOT DE PASSE (Sécurité 42 !)
-        $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
+        // 1. On hache le mot de passe
+        // PASSWORD_DEFAULT utilise actuellement BCRYPT, c'est le plus sûr.
+        $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+
+        // 2. On prépare la requête SQL
+        $sql = "INSERT INTO users (username, email, password) VALUES (:username, :email, :password)";
         
-        $sql = "INSERT INTO users (username, email, password) VALUES (?, ?, ?)";
         try {
             $stmt = $this->db->prepare($sql);
-            return $stmt->execute([$username, $email, $hashedPassword]);
+            
+            // 3. On exécute avec les vraies valeurs
+            return $stmt->execute([
+                ':username' => $username,
+                ':email'    => $email,
+                ':password' => $hashedPassword
+            ]);
         } catch (PDOException $e) {
-            return false; // Probablement un doublon de username ou email
+            // Si le username ou l'email existe déjà, PDO lancera une exception
+            error_log("Erreur lors de la création de l'utilisateur : " . $e->getMessage());
+            return false;
         }
-    }
-
-    public function getByUsername($username) {
-        $stmt = $this->db->prepare("SELECT * FROM users WHERE username = ?");
-        $stmt->execute([$username]);
-        return $stmt->fetch();
     }
 }
