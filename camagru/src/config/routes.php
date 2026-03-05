@@ -4,4 +4,5 @@ return [
     'gallery' => ['controller' => 'PageController', 'method' => 'gallery', 'public' => true],
     'studio'  => ['controller' => 'AuthController', 'method' => 'studio',  'public' => false],
     'login'   => ['controller' => 'AuthController', 'method' => 'login',   'public' => true],
+    'register'=> ['controller' => 'AuthController', 'method' => 'register','public' => true],
 ];
