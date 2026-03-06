@@ -3,12 +3,13 @@ import { loadPage, router } from './utils.js';
 // Liste des pages autorisées
 const allowedPages = ['home', 'studio', 'galerie', 'setup'];
 
-// On attache les événements
-document.querySelectorAll('a[data-page]').forEach(link => {
-    link.addEventListener('click', (e) => {
+document.addEventListener('click', (e) => {
+    const link = e.target.closest('a[data-page]'); // Cherche si on a cliqué sur un lien data-page
+    if (link) {
         e.preventDefault();
-        loadPage(link.dataset.page);
-    });
+        const page = link.dataset.page;
+        loadPage(page);
+    }
 });
 
 window.addEventListener('DOMContentLoaded', router);
