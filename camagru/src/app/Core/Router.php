@@ -9,6 +9,10 @@ class Router {
     }
 
     public function handleRequest($page, $isLoggedIn) {
+        if (strpos($page, '.ico') !== false || strpos($page, '.png') !== false) {
+            return; // Ignore les requêtes d'icônes
+        }
+
         $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest';
 
         if (!array_key_exists($page, $this->routes)) {

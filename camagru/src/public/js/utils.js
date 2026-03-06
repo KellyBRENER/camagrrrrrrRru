@@ -32,43 +32,14 @@ export function loadPage(page) {
     });
 }
 
-// Fonction pour vérifier l'authentification de l'utilisateur
+// app.js ou utils.js
 export function router() {
-    // 1. On récupère le paramètre 'page' dans l'URL (ex: ?page=studio)
+    // 1. On récupère la page dans l'URL actuelle
     const urlParams = new URLSearchParams(window.location.search);
-    let page = urlParams.get('page');
+    const page = urlParams.get('page') || 'home';
 
-    // 2. Logique de décision
-    if (!page) {
-        page = 'home'; // Si aucune page demandée -> Home
-    } else if (!allowedPages.includes(page)) {
-        page = '404';  // Si page non autorisée -> 404
-    }
-
-    // 3. On charge la page décidée
+    // 2. On charge la page (loadPage s'occupe de l'AJAX et du JS spécifique)
     loadPage(page);
-}
-
-export function checkAuth() {
-    return fetch('/api/check-auth.php') // Un petit script PHP qui renvoie du JSON
-        .then(res => res.json())
-        .then(data => {
-            // data ressemblera à { loggedIn: true, username: 'Kelly' }
-            updateUI(data);
-        });
-}
-
-export function updateUI(auth) {
-    const nav = document.querySelector('nav');
-    if (auth.loggedIn) {
-        nav.innerHTML = `<a data-page="home">Home</a> 
-                        <a data-page="studio">Studio</a> 
-                        <span>Hello ${auth.username}</span>
-                        <a href="/logout">Logout</a>`;
-    } else {
-        nav.innerHTML = `<a data-page="home">Home</a> 
-                        <a data-page="login">Login</a>`;
-    }
 }
 
 export function updateNavigation() {

@@ -51,7 +51,7 @@ reset:
 	docker compose down -v
 	docker compose up -d
 	sleep 5
-	docker compose exec $(PHP_SERVICE) php src/config/setup.php
+	docker compose exec $(PHP_SERVICE) php config/setup.php
 
 # =========================
 # FULL START
