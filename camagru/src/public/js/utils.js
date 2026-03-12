@@ -1,3 +1,15 @@
+export function setActiveFooterTab(page) {
+    const currentPage = page;
+    const footerLinks = document.querySelectorAll('footer nav a[data-page]');
+
+    footerLinks.forEach((link) => {
+        const linkPage = link.dataset.page || '';
+        const isCurrent = linkPage === currentPage;
+        link.classList.toggle('is-current', isCurrent);
+        link.setAttribute('aria-current', isCurrent ? 'page' : 'false');
+    });
+}
+
 // utils.js - fonctions utilitaires pour l'application
 export function loadPage(page) {
     document.getElementById('content').innerHTML = '<p>Chargement...</p>';
@@ -19,6 +31,7 @@ export function loadPage(page) {
         }
 
         document.getElementById('content').innerHTML = html;
+        setActiveFooterTab(page);
         
         // On met à jour l'URL sans recharger
         window.history.pushState({page: page}, "", `?page=${page}`);
@@ -56,7 +69,7 @@ export function updateNavigation() {
         // Menu pour visiteurs
         nav.innerHTML = `
             <a data-page="home">Accueil</a>
-            <a data-page="galerie">Galerie</a>
+            <a data-page="gallery">Galerie</a>
             <a data-page="login">Connexion</a>
         `;
     }

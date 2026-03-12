@@ -1,17 +1,21 @@
 <div class="auth-container">
-    <h2>Connexion</h2>
-    <form id="loginForm">
-        <div class="form-group">
-            <label>Nom d'utilisateur</label>
-            <input type="text" name="username" required>
+    <div class="form-savane">
+        <h2 class="text-center mb-4"><span class="paw-print">🐆</span> Connexion</h2>
+        <form id="loginForm">
+            <div class="mb-3">
+                <label class="form-label">Nom d'utilisateur</label>
+                <input type="text" name="username" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Mot de passe</label>
+                <input type="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn-savane w-100">Se connecter</button>
+        </form>
+        <p id="loginError" class="alert-savane error mt-3" style="display: none;"></p>
+        
+        <div class="text-center mt-4">
+            <a href="#" data-page="register">Pas encore de compte ? Rejoindre la meute !</a>
         </div>
-        <div class="form-group">
-            <label>Mot de passe</label>
-            <input type="password" name="password" required>
-        </div>
-        <button type="submit">Se connecter</button>
-    </form>
-    <p id="loginError" style="color:red;"></p>
+    </div>
 </div>
-
-<a href="#" data-page="register">Pas encore de compte ? S'inscrire</a>
