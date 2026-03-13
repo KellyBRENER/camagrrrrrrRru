@@ -1,0 +1,7 @@
+lorsqu'on clique sur le lien envoyé par mail, le verify fail
+=> effacer tous les users de la db et retester
+=> inspecter les logs lors de la manip
+=> vérifier comment se passe la connexion une fois le user bien inscrit
+
+une fois l'authentification gérée :
+=> mettre en place la capture video avec filtre
