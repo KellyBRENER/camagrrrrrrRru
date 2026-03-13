@@ -1,12 +1,13 @@
 <?php
 //le user doit renseigner email valide, username, mdp robuste
 // + envoie lien de confirmation unique par email
+$registerError = $_GET['error'] ?? '';
 ?>
 <div class="auth-container">
     <div class="form-savane">
         <h2 class="text-center mb-4"><span class="paw-print">🦁</span> Rejoindre la meute</h2>
         
-        <form id="registerForm" class="needs-validation" novalidate>
+        <form id="registerForm" class="needs-validation" action="/?page=register" method="POST" novalidate>
             <div class="mb-3">
                 <label for="username" class="form-label">Pseudo</label>
                 <input type="text" class="form-control" id="username" name="username" placeholder="Votre pseudo félin" required>
@@ -34,7 +35,9 @@
             <button type="submit" class="btn-savane w-100">S'inscrire</button>
         </form>
         
-        <p id="registerMsg" class="alert-savane error mt-3" style="display: none;"></p>
+        <p id="registerMsg" class="alert-savane error mt-3" role="alert" style="display: <?php echo $registerError ? 'block' : 'none'; ?>;">
+            <?php echo htmlspecialchars($registerError); ?>
+        </p>
         
         <div class="text-center mt-4">
             <a href="#" data-page="login">Déjà membre ? Se connecter</a>

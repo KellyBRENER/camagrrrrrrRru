@@ -7,6 +7,28 @@ class AuthController {
     public function __construct($pdo) {
         $this->userModel = new UserModel($pdo);
     }
+
+    private function isAjaxRequest() {
+        return isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest';
+    }
+
+    private function jsonResponse($success, $message = null) {
+        header('Content-Type: application/json');
+        $payload = ['success' => (bool) $success];
+        if ($message !== null) {
+            $payload['message'] = $message;
+        }
+        echo json_encode($payload);
+        exit;
+    }
+
+    private function flowLog($step, $context = []) {
+        $line = '[REGISTER_FLOW] ' . $step;
+        if (!empty($context)) {
+            $line .= ' | ' . json_encode($context, JSON_UNESCAPED_SLASHES);
+        }
+        error_log($line);
+    }
     //POST username + mot de passe pour se connecter
     //GET pour afficher le formulaire de connexion
     public function login() {
@@ -43,34 +65,65 @@ class AuthController {
     public function register() {
         // 1. Si on reçoit des données (POST)
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            header('Content-Type: application/json');
+            $isAjax = $this->isAjaxRequest();
+            $requestId = bin2hex(random_bytes(6));
+            $this->flowLog('register_post_received', [
+                'requestId' => $requestId,
+                'isAjax' => $isAjax,
+                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+            ]);
 
             $username = trim($_POST['username'] ?? '');
             $email    = trim($_POST['email'] ?? '');
             $password = $_POST['password'] ?? '';
+            $this->flowLog('register_payload_parsed', [
+                'requestId' => $requestId,
+                'username' => $username,
+                'email' => $email,
+                'passwordLength' => strlen($password)
+            ]);
 
             // Validation simple (tu pourras ajouter des regex plus tard)
             if (empty($username) || empty($email) || empty($password)) {
-                echo json_encode(['success' => false, 'message' => 'Veuillez remplir tous les champs.']);
+                $message = 'Veuillez remplir tous les champs.';
+                $this->flowLog('register_validation_failed', ['requestId' => $requestId, 'reason' => 'empty_fields']);
+                if ($isAjax) {
+                    $this->jsonResponse(false, $message);
+                }
+                header('Location: /?page=register&error=' . urlencode($message));
                 exit;
             }
             if (strlen($password) < 8 || !preg_match("#[0-9]+#", $password) || !preg_match("#[a-zA-Z]+#", $password)) {
-				echo json_encode(['success' => false, 'message' => 'Le mot de passe doit contenir 8 caractères, un chiffre et une lettre.']);
+				$message = 'Le mot de passe doit contenir 8 caractères, un chiffre et une lettre.';
+                $this->flowLog('register_validation_failed', ['requestId' => $requestId, 'reason' => 'weak_password']);
+                if ($isAjax) {
+                    $this->jsonResponse(false, $message);
+                }
+                header('Location: /?page=register&error=' . urlencode($message));
                 exit;
             }
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-				echo json_encode([
-					'success' => false,
-                    'message' => 'Le format de l\'adresse email est invalide.'
-                ]);
-				exit;
+				$message = 'Le format de l\'adresse email est invalide.';
+                $this->flowLog('register_validation_failed', ['requestId' => $requestId, 'reason' => 'invalid_email']);
+                if ($isAjax) {
+                    $this->jsonResponse(false, $message);
+                }
+                header('Location: /?page=register&error=' . urlencode($message));
+                exit;
             }
 			$token = bin2hex(random_bytes(32));
+            $this->flowLog('register_token_generated', ['requestId' => $requestId]);
 
             // Tentative de création
             $success = $this->userModel->create($username, $email, $password, $token);
 
             if ($success) {
+                $this->flowLog('register_user_created', ['requestId' => $requestId, 'email' => $email]);
+                $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                $link = sprintf('%s://%s/?page=verify&token=%s', $scheme, $host, urlencode($token));
+                $this->flowLog('register_verify_link_built', ['requestId' => $requestId, 'host' => $host]);
+
                 $to = $email;
     			$subject = "Activez votre compte Camagru 🐆";
 
@@ -108,14 +161,30 @@ class AuthController {
     			$mailSent = mail($to, $subject, $body, $headerString);
 
     			if ($mailSent) {
-        			echo json_encode(['success' => true]);
+                    $this->flowLog('register_mail_sent', ['requestId' => $requestId, 'to' => $email]);
+                    if ($isAjax) {
+                        $this->jsonResponse(true);
+                    }
+                    header('Location: /?page=registerinprogress');
+                    exit;
     			} else {
-        			echo json_encode(['success' => false, 'message' => "Erreur lors de l'envoi du mail."]);
+                    $message = "Erreur lors de l'envoi du mail.";
+                    $this->flowLog('register_mail_failed', ['requestId' => $requestId, 'to' => $email]);
+                    if ($isAjax) {
+                        $this->jsonResponse(false, $message);
+                    }
+                    header('Location: /?page=register&error=' . urlencode($message));
+                    exit;
     			}
             } else {
-            	echo json_encode(['success' => false, 'message' => 'Nom d\'utilisateur ou email déjà pris.']);
+                	$message = 'Nom d\'utilisateur ou email déjà pris.';
+	                	$this->flowLog('register_create_failed', ['requestId' => $requestId, 'reason' => 'username_or_email_taken']);
+                	if ($isAjax) {
+                		$this->jsonResponse(false, $message);
+                	}
+                	header('Location: /?page=register&error=' . urlencode($message));
+                	exit;
             }
-            exit;
         }
 
         // 2. Si on veut juste voir la page (GET)
@@ -125,20 +194,23 @@ class AuthController {
 	public function verify() {
 		// 1. On récupère le token dans l'URL (?page=verify&token=...)
 		$token = $_GET['token'] ?? null;
+        $this->flowLog('verify_received', ['hasToken' => !empty($token)]);
 
 		if (!$token) {
-			return "verify_error.php"; // Affiche "Token manquant"
+            return "verify_failed.php"; // Affiche "Token manquant"
 		}
 
 		// 2. On demande au modèle de vérifier si ce token existe en base
 		$user = $this->userModel->confirmAccount($token);
 
 		if ($user) {
+            $this->flowLog('verify_success');
 			// Succès : Le compte est activé
 			return "verify_success.php";
 		} else {
+            $this->flowLog('verify_failed');
 			// Échec : Token invalide ou déjà utilisé
-			return "verify_error.php";
+            return "verify_failed.php";
 		}
 	}
 

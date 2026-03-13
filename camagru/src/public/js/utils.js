@@ -12,6 +12,7 @@ export function setActiveFooterTab(page) {
 
 // utils.js - fonctions utilitaires pour l'application
 export function loadPage(page) {
+    console.info('[ROUTER] loadPage called', { page });
     document.getElementById('content').innerHTML = '<p>Chargement...</p>';
 
     // On utilise l'index.php avec l'en-tête X-Requested-With
@@ -34,7 +35,15 @@ export function loadPage(page) {
         setActiveFooterTab(page);
 
         // On met à jour l'URL sans recharger
-        window.history.pushState({page: page}, "", `?page=${page}`);
+        const nextUrl = `?page=${page}`;
+        const sameUrl = window.location.search === nextUrl;
+        if (!sameUrl) {
+            if (window.history.length <= 1) {
+                window.history.replaceState({ page: page }, '', nextUrl);
+            } else {
+                window.history.pushState({ page: page }, '', nextUrl);
+            }
+        }
 
         // Chargement dynamique du JS spécifique à la page
         // On vérifie si le fichier existe avant d'importer
@@ -56,6 +65,7 @@ export function router() {
     // 1. On récupère la page dans l'URL actuelle
     const urlParams = new URLSearchParams(window.location.search);
     const page = urlParams.get('page') || 'home';
+    console.info('[ROUTER] router resolved page', { page });
 
     // 2. On charge la page (loadPage s'occupe de l'AJAX et du JS spécifique)
     loadPage(page);

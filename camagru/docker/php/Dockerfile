@@ -16,6 +16,7 @@ RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.
 
 # 3. Configuration de PHP pour utiliser msmtp
 RUN echo "sendmail_path = \"/usr/bin/msmtp -t\"" > /usr/local/etc/php/conf.d/php-sendmail.ini
+RUN printf "log_errors=On\nerror_reporting=E_ALL\ndisplay_errors=Off\nerror_log=/proc/self/fd/2\n" > /usr/local/etc/php/conf.d/php-logging.ini
 
 # 4. Préparation du template msmtp
 COPY msmtprc.template /etc/msmtprc.template

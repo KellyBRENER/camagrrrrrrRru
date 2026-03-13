@@ -1,15 +1,25 @@
 export function init() {
     const form = document.getElementById('registerForm');
     const msg = document.getElementById('registerMsg');
+
+    const showMessage = (text) => {
+        if (!msg) return;
+        msg.innerText = text;
+        msg.style.display = 'block';
+    };
     
     if (!form) return;
 
+    console.info('[REGISTER_FLOW][FRONT] register page init');
+
     form.addEventListener('submit', (event) => {
+        console.info('[REGISTER_FLOW][FRONT] submit clicked');
         // 1. On active le visuel Bootstrap (bordures rouges/vertes)
         form.classList.add('was-validated');
 
         // 2. Vérification de la validité HTML5 (champs requis, format email)
         if (!form.checkValidity()) {
+            console.warn('[REGISTER_FLOW][FRONT] html validation failed');
             event.preventDefault();
             event.stopPropagation();
             return; // On arrête tout ici si le formulaire est invalide
@@ -23,7 +33,8 @@ export function init() {
         const regex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
         
         if (!regex.test(password)) {
-            msg.innerText = "Le mot de passe doit contenir au moins 8 caractères, dont une lettre et un chiffre.";
+            console.warn('[REGISTER_FLOW][FRONT] password validation failed');
+            showMessage("Le mot de passe doit contenir au moins 8 caractères, dont une lettre et un chiffre.");
             return; // On arrête tout ici si le mot de passe est trop faible
         }
 
@@ -35,18 +46,27 @@ export function init() {
             body: formData,
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
-        .then(res => res.json())
+        .then(async (res) => {
+            console.info('[REGISTER_FLOW][FRONT] response received', { status: res.status });
+            const raw = await res.text();
+            try {
+                return JSON.parse(raw);
+            } catch (e) {
+                throw new Error('Réponse serveur invalide');
+            }
+        })
         .then(data => {
             if (data.success) {
-                alert("Compte créé ! Un email de confirmation vous a été envoyé.");
-                window.location.href = "/?page=login"; 
+                console.info('[REGISTER_FLOW][FRONT] register success, redirecting');
+                window.location.href = "/?page=registerinprogress";
             } else {
-                msg.innerText = data.message;
+                console.warn('[REGISTER_FLOW][FRONT] register rejected', data);
+                showMessage(data.message || "Impossible de créer le compte.");
             }
         })
         .catch(err => {
-            console.error("Erreur lors de l'inscription:", err);
-            msg.innerText = "Une erreur serveur est survenue.";
+            console.error('[REGISTER_FLOW][FRONT] fetch error', err);
+            showMessage("Une erreur serveur est survenue.");
         });
     });
 }

@@ -4,4 +4,5 @@ class PageController {
 
     public function home() { return "home.php"; }
     public function gallery() { return "gallery.php"; }
+    public function registerinprogress() { return "registerinprogress.php"; }
 }
