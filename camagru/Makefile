@@ -53,10 +53,13 @@ reset:
 	sleep 5
 	docker compose exec $(PHP_SERVICE) php config/setup.php
 
+finaldown:
+	docker compose down -v --rmi all
+
 # =========================
 # FULL START
 # =========================
 
 start: up
-	sleep 5
+	sleep 10
 	make setup

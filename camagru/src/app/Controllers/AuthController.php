@@ -21,7 +21,7 @@ class AuthController {
 
         // 2. On vérifie si l'utilisateur existe ET si le mot de passe est bon
         if ($user && password_verify($password, $user['password'])) {
-            
+
             // On remplit la session
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['username'] = $user['username'];
@@ -55,28 +55,65 @@ class AuthController {
                 exit;
             }
             if (strlen($password) < 8 || !preg_match("#[0-9]+#", $password) || !preg_match("#[a-zA-Z]+#", $password)) {
-                echo json_encode(['success' => false, 'message' => 'Le mot de passe doit contenir 8 caractères, un chiffre et une lettre.']);
+				echo json_encode(['success' => false, 'message' => 'Le mot de passe doit contenir 8 caractères, un chiffre et une lettre.']);
                 exit;
             }
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                echo json_encode([
-                    'success' => false, 
+				echo json_encode([
+					'success' => false,
                     'message' => 'Le format de l\'adresse email est invalide.'
                 ]);
-            exit;
+				exit;
             }
+			$token = bin2hex(random_bytes(32));
 
             // Tentative de création
-            $success = $this->userModel->create($username, $email, $password);
+            $success = $this->userModel->create($username, $email, $password, $token);
 
             if ($success) {
-                $link = "http://localhost:8080/?page=verify&token=" . $token;
-                $subject = "Confirmez votre compte Camagru";
-                $message = "Cliquez ici pour valider votre compte : " . $link;
-                mail($email, $subject, $message); // Fonction native PHP
-                echo json_encode(['success' => true]);
+                $to = $email;
+    			$subject = "Activez votre compte Camagru 🐆";
+
+    			$headers = [
+        			"From" => "Camagru <no-reply@camagru.com>",
+        			"Reply-To" => "no-reply@camagru.com",
+        			"Content-Type" => "text/html; charset=UTF-8", // On autorise le HTML et les accents
+        			"X-Mailer" => "PHP/" . phpversion()
+    			];
+				$body = "
+					<html>
+					<head>
+						<title>Confirmation d'inscription</title>
+					</head>
+					<body style='font-family: Georgia, serif; background-color: #f5e6d3; padding: 20px;'>
+						<div style='max-width: 600px; margin: 0 auto; background: white; border: 3px solid #8b6f47; border-radius: 15px; padding: 30px;'>
+            			<h1 style='color: #6b4423;'>Bienvenue, $username !</h1>
+            			<p>Ta tanière est presque prête. Clique sur le lien ci-dessous pour valider ton compte :</p>
+            			<p style='text-align: center; margin: 30px 0;'>
+                			<a href='$link' style='background: #ff8c42; color: white; padding: 15px 25px; text-decoration: none; border-radius: 25px; font-weight: bold; border: 2px solid #6b4423;'>
+                    			ACTIVER MON COMPTE
+                			</a>
+            			</p>
+            			<p style='font-size: 0.8rem; color: #8b6f47;'>Si le bouton ne fonctionne pas, copie ce lien : <br> $link</p>
+        				</div>
+    				</body>
+    				</html>
+    			";
+
+    			$headerString = "";
+    			foreach ($headers as $key => $value) {
+        			$headerString .= "$key: $value\r\n";
+    			}
+
+    			$mailSent = mail($to, $subject, $body, $headerString);
+
+    			if ($mailSent) {
+        			echo json_encode(['success' => true]);
+    			} else {
+        			echo json_encode(['success' => false, 'message' => "Erreur lors de l'envoi du mail."]);
+    			}
             } else {
-                echo json_encode(['success' => false, 'message' => 'Nom d\'utilisateur ou email déjà pris.']);
+            	echo json_encode(['success' => false, 'message' => 'Nom d\'utilisateur ou email déjà pris.']);
             }
             exit;
         }
@@ -84,6 +121,26 @@ class AuthController {
         // 2. Si on veut juste voir la page (GET)
         return "register.php";
     }
+
+	public function verify() {
+		// 1. On récupère le token dans l'URL (?page=verify&token=...)
+		$token = $_GET['token'] ?? null;
+
+		if (!$token) {
+			return "verify_error.php"; // Affiche "Token manquant"
+		}
+
+		// 2. On demande au modèle de vérifier si ce token existe en base
+		$user = $this->userModel->confirmAccount($token);
+
+		if ($user) {
+			// Succès : Le compte est activé
+			return "verify_success.php";
+		} else {
+			// Échec : Token invalide ou déjà utilisé
+			return "verify_error.php";
+		}
+	}
 
     public function studio() {
         return "pictureStudio.php";

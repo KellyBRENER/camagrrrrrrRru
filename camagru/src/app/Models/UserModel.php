@@ -6,22 +6,23 @@ class UserModel {
         $this->db = $pdo;
     }
 
-    public function create($username, $email, $password) {
+    public function create($username, $email, $password, $token) {
         // 1. On hache le mot de passe
         // PASSWORD_DEFAULT utilise actuellement BCRYPT, c'est le plus sûr.
         $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
         // 2. On prépare la requête SQL
-        $sql = "INSERT INTO users (username, email, password) VALUES (:username, :email, :password)";
-        
+        $sql = "INSERT INTO users (username, email, password, token) VALUES (:username, :email, :password, :token)";
+
         try {
             $stmt = $this->db->prepare($sql);
-            
+
             // 3. On exécute avec les vraies valeurs
             return $stmt->execute([
                 ':username' => $username,
                 ':email'    => $email,
-                ':password' => $hashedPassword
+                ':password' => $hashedPassword,
+				':token' => $token
             ]);
         } catch (PDOException $e) {
             // Si le username ou l'email existe déjà, PDO lancera une exception

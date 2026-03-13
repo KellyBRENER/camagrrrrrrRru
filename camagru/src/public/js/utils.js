@@ -32,13 +32,19 @@ export function loadPage(page) {
 
         document.getElementById('content').innerHTML = html;
         setActiveFooterTab(page);
-        
+
         // On met à jour l'URL sans recharger
         window.history.pushState({page: page}, "", `?page=${page}`);
 
         // Chargement dynamique du JS spécifique à la page
         // On vérifie si le fichier existe avant d'importer
-        import(`/js/pages/${page}.js`).catch(err => console.log("Pas de JS spécifique pour cette page"));
+        import(`/js/pages/${page}.js`)
+			.then(module => {
+				if (module.init) {
+					module.init();
+				}
+			})
+			.catch(err => console.log("Pas de JS spécifique pour cette page"));
     })
     .catch(error => {
         document.getElementById('content').innerHTML = '<p>Erreur lors du chargement.</p>';
@@ -57,7 +63,7 @@ export function router() {
 
 export function updateNavigation() {
     const nav = document.querySelector('nav');
-    
+
     if (window.userConfig.isLoggedIn) {
         // Menu pour connectés
         nav.innerHTML = `
