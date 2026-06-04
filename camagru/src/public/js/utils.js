@@ -10,13 +10,42 @@ export function setActiveFooterTab(page) {
     });
 }
 
+function loadPageScript(page) {
+    const pageScripts = {
+        gallery: 'gallery',
+        home: 'home',
+        login: 'login',
+        profil: 'profil',
+        register: 'register',
+        studio: 'pictureStudio'
+    };
+    const scriptName = pageScripts[page];
+    if (!scriptName) {
+        return;
+    }
+
+    import(`/js/pages/${scriptName}.js`)
+        .then(module => {
+            if (module.init) {
+                module.init();
+            }
+        })
+        .catch(err => console.log("Pas de JS spécifique pour cette page"));
+}
+
 // utils.js - fonctions utilitaires pour l'application
-export function loadPage(page) {
-    console.info('[ROUTER] loadPage called', { page });
+export function loadPage(page, queryParams = new URLSearchParams()) {
+    const params = new URLSearchParams(queryParams);
+    params.set('page', page);
+
+    const pageUrl = `index.php?${params.toString()}`;
+    const nextUrl = `?${params.toString()}`;
+
+    console.info('[ROUTER] loadPage called', { page, url: pageUrl });
     document.getElementById('content').innerHTML = '<p>Chargement...</p>';
 
     // On utilise l'index.php avec l'en-tête X-Requested-With
-    fetch(`index.php?page=${page}`, {
+    fetch(pageUrl, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
     })
     .then(response => {
@@ -35,7 +64,6 @@ export function loadPage(page) {
         setActiveFooterTab(page);
 
         // On met à jour l'URL sans recharger
-        const nextUrl = `?page=${page}`;
         const sameUrl = window.location.search === nextUrl;
         if (!sameUrl) {
             if (window.history.length <= 1) {
@@ -45,15 +73,7 @@ export function loadPage(page) {
             }
         }
 
-        // Chargement dynamique du JS spécifique à la page
-        // On vérifie si le fichier existe avant d'importer
-        import(`/js/pages/${page}.js`)
-			.then(module => {
-				if (module.init) {
-					module.init();
-				}
-			})
-			.catch(err => console.log("Pas de JS spécifique pour cette page"));
+        loadPageScript(page);
     })
     .catch(error => {
         document.getElementById('content').innerHTML = '<p>Erreur lors du chargement.</p>';
@@ -61,14 +81,19 @@ export function loadPage(page) {
 }
 
 // app.js ou utils.js
-export function router() {
+export function router(shouldFetch = true) {
     // 1. On récupère la page dans l'URL actuelle
     const urlParams = new URLSearchParams(window.location.search);
     const page = urlParams.get('page') || 'home';
-    console.info('[ROUTER] router resolved page', { page });
+    console.info('[ROUTER] router resolved page', { page, shouldFetch });
 
-    // 2. On charge la page (loadPage s'occupe de l'AJAX et du JS spécifique)
-    loadPage(page);
+    if (shouldFetch) {
+        loadPage(page, urlParams);
+        return;
+    }
+
+    setActiveFooterTab(page);
+    loadPageScript(page);
 }
 
 export function updateNavigation() {

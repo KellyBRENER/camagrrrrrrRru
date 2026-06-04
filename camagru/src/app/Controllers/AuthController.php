@@ -42,7 +42,7 @@ class AuthController {
         $user = $this->userModel->getByUsername($username);
 
         // 2. On vérifie si l'utilisateur existe ET si le mot de passe est bon
-        if ($user && password_verify($password, $user['password'])) {
+        if ($user && password_verify($password, $user['password']) && $user['is_verified']) {
 
             // On remplit la session
             $_SESSION['user_id'] = $user['id'];
@@ -52,7 +52,7 @@ class AuthController {
             exit;
         } else {
             // Sécurité : on ne dit pas si c'est le pseudo ou le mot de passe qui est faux
-            echo json_encode(['success' => false, 'message' => 'Identifiants incorrects']);
+            echo json_encode(['success' => false, 'message' => 'Identifiants incorrects ou compte non vérifié.']);
             exit;
         }
     }
@@ -177,8 +177,13 @@ class AuthController {
                     exit;
     			}
             } else {
-                	$message = 'Nom d\'utilisateur ou email déjà pris.';
-	                	$this->flowLog('register_create_failed', ['requestId' => $requestId, 'reason' => 'username_or_email_taken']);
+                    $createError = $this->userModel->getLastError();
+                    if ($createError === 'duplicate_user') {
+                        $message = 'Nom d\'utilisateur ou email déjà pris.';
+                    } else {
+                        $message = 'Erreur de base de données. Vérifiez que la base est initialisée.';
+                    }
+	                	$this->flowLog('register_create_failed', ['requestId' => $requestId, 'reason' => $createError ?? 'unknown']);
                 	if ($isAjax) {
                 		$this->jsonResponse(false, $message);
                 	}

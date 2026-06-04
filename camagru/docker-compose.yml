@@ -4,7 +4,7 @@ services:
     volumes:
       - ./src:/var/www/html
     ports:
-      - "8080:80"
+      - "8081:80"
     environment:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}

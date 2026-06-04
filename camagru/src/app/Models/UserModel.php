@@ -1,12 +1,19 @@
 <?php
 class UserModel {
     private $db;
+    private $lastError = null;
 
     public function __construct($pdo) {
         $this->db = $pdo;
     }
 
+    public function getLastError() {
+        return $this->lastError;
+    }
+
     public function create($username, $email, $password, $token) {
+        $this->lastError = null;
+
         // 1. On hache le mot de passe
         // PASSWORD_DEFAULT utilise actuellement BCRYPT, c'est le plus sûr.
         $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
@@ -25,7 +32,12 @@ class UserModel {
 				':token' => $token
             ]);
         } catch (PDOException $e) {
-            // Si le username ou l'email existe déjà, PDO lancera une exception
+            if ($e->getCode() === '23000') {
+                $this->lastError = 'duplicate_user';
+            } else {
+                $this->lastError = 'database_error';
+            }
+
             error_log("Erreur lors de la création de l'utilisateur : " . $e->getMessage());
             return false;
         }

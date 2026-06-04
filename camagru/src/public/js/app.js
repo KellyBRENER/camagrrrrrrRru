@@ -117,7 +117,7 @@ document.addEventListener('click', (e) => {
 
 window.addEventListener('DOMContentLoaded', () => {
     applyResponsiveShellSizes();
-    router();
+    router(false);
 });
 window.addEventListener('resize', applyResponsiveShellSizes);
 window.addEventListener('orientationchange', applyResponsiveShellSizes);
