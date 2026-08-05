@@ -6,5 +6,6 @@ return [
     'studio'  => ['controller' => 'AuthController', 'method' => 'studio',  'public' => false],
     'login'   => ['controller' => 'AuthController', 'method' => 'login',   'public' => true],
     'register'=> ['controller' => 'AuthController', 'method' => 'register','public' => true],
+    'resend_validation'=> ['controller' => 'AuthController', 'method' => 'resendValidation','public' => true],
     'verify'  => ['controller' => 'AuthController', 'method' => 'verify',  'public' => true],
 ];

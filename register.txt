@@ -1,0 +1,459 @@
+PARCOURS CREATION DE COMPTE / VALIDATION EMAIL / CONNEXION
+
+Objectif du parcours
+Ce document explique quels fichiers sont utilises, a quel moment, et pour quelle action
+lorsqu'un utilisateur cree un compte, clique sur le lien de validation, puis se connecte.
+
+
+1. Point d'entree de toutes les pages
+
+Fichier : camagru/src/public/index.php
+Moment : a chaque requete HTTP vers l'application.
+Action :
+- Demarre la session avec session_start().
+- Charge la connexion a la base via camagru/src/config/database.php.
+- Charge le routeur via camagru/src/app/Core/Router.php.
+- Charge le tableau des routes via camagru/src/config/routes.php.
+- Recupere la page demandee avec $_GET['page'].
+- Detecte si l'utilisateur est connecte avec $_SESSION['user_id'].
+- Appelle Router->handleRequest($page, $isLoggedIn).
+
+Fichier : camagru/src/config/database.php
+Moment : avant tout appel au routeur.
+Action :
+- Cree l'objet PDO $pdo.
+- Configure PDO en mode exception.
+- Utilise la base MariaDB/MySQL camagru.
+
+Fichier : camagru/src/config/routes.php
+Moment : quand index.php veut savoir quel controleur appeler.
+Action :
+- Associe chaque valeur de ?page=... a un controleur et une methode.
+- Routes importantes pour ce parcours :
+  - login    -> AuthController::login(), publique
+  - register -> AuthController::register(), publique
+  - verify   -> AuthController::verify(), publique
+  - registerinprogress -> PageController::registerinprogress(), publique
+
+Fichier : camagru/src/app/Core/Router.php
+Moment : apres resolution de la page demandee.
+Action :
+- Verifie si la route existe, sinon revient sur home.
+- Bloque les pages privees si l'utilisateur n'est pas connecte.
+- Instancie le controleur correspondant avec $pdo.
+- Appelle la methode du controleur.
+- Recupere le nom de la vue retournee par le controleur.
+- Si requete AJAX : inclut uniquement la vue.
+- Sinon : inclut camagru/src/app/Views/layout.php, qui inclut ensuite la vue.
+
+
+2. Affichage de la page d'inscription
+
+URL : /?page=register
+
+Fichier : camagru/src/config/routes.php
+Moment : resolution de la route register.
+Action :
+- Envoie la requete vers AuthController::register().
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : register()
+Moment : requete GET sur /?page=register.
+Action :
+- Comme la requete n'est pas POST, retourne "register.php".
+
+Fichier : camagru/src/app/Views/layout.php
+Moment : affichage complet non-AJAX.
+Action :
+- Charge le squelette HTML.
+- Inclut header.php et footer.php.
+- Injecte la vue demandee dans <main id="content">.
+- Charge le JavaScript principal /js/app.js.
+- Expose window.userConfig selon la session PHP.
+
+Fichier : camagru/src/app/Views/register.php
+Moment : rendu de la vue d'inscription.
+Action :
+- Affiche le formulaire d'inscription.
+- Le formulaire a :
+  - id="registerForm"
+  - action="/?page=register"
+  - method="POST"
+- Champs envoyes :
+  - username
+  - email
+  - password
+- Affiche aussi un message d'erreur si $_GET['error'] est present.
+- Propose un lien data-page="login" vers la connexion.
+
+Fichier : camagru/src/public/js/app.js
+Moment : chargement du layout dans le navigateur.
+Action :
+- Intercepte les clics sur les liens qui possedent data-page.
+- Appelle loadPage(page) pour charger les vues en AJAX.
+- Au chargement initial, appelle router(false).
+
+Fichier : camagru/src/public/js/router.js
+Moment : chargement initial ou navigation AJAX.
+Action :
+- Lit ?page=... dans l'URL.
+- Charge le script specifique de la page.
+- Pour register, importe /js/pages/register.js.
+
+Fichier : camagru/src/public/js/pages/register.js
+Moment : lorsque la page register est affichee.
+Action :
+- Trouve le formulaire #registerForm.
+- Ajoute un listener submit.
+- Lance la validation HTML5.
+- Verifie le mot de passe cote navigateur avec la regex :
+  au moins 8 caracteres, au moins une lettre, au moins un chiffre.
+- Si tout est valide, envoie un fetch POST vers /?page=register.
+- Ajoute l'en-tete X-Requested-With: XMLHttpRequest.
+- Attend une reponse JSON.
+
+
+3. Soumission du formulaire d'inscription
+
+URL : POST /?page=register
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : register()
+Moment : reception du POST d'inscription.
+Action :
+- Detecte si la requete est AJAX avec isAjaxRequest().
+- Genere un requestId pour les logs.
+- Recupere :
+  - $_POST['username']
+  - $_POST['email']
+  - $_POST['password']
+- Nettoie username et email avec trim().
+- Verifie que les champs ne sont pas vides.
+- Verifie que le mot de passe a :
+  - au moins 8 caracteres
+  - au moins un chiffre
+  - au moins une lettre
+- Verifie le format de l'email avec filter_var(..., FILTER_VALIDATE_EMAIL).
+- En cas d'erreur :
+  - si AJAX : renvoie JSON { success: false, message: ... }
+  - sinon : redirige vers /?page=register&error=...
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : register()
+Moment : apres validation des champs.
+Action :
+- Genere un token de validation :
+  bin2hex(random_bytes(32))
+- Appelle UserModel->create($username, $email, $password, $token).
+
+Fichier : camagru/src/app/Models/UserModel.php
+Methode : create($username, $email, $password, $token)
+Moment : creation effective de l'utilisateur en base.
+Action :
+- Hache le mot de passe avec password_hash($password, PASSWORD_DEFAULT).
+- Insere une ligne dans la table users :
+  - username
+  - email
+  - password
+  - token
+- Ne met pas is_verified a true : la valeur par defaut reste false.
+- Si username ou email existe deja, PDO renvoie une erreur 23000.
+- Dans ce cas, lastError devient duplicate_user.
+
+Fichier : camagru/src/database/init.sql
+Moment : creation/init de la base.
+Action :
+- Cree la table users.
+- Colonnes utilisees dans ce parcours :
+  - id
+  - username unique
+  - email unique
+  - password
+  - is_verified BOOLEAN DEFAULT FALSE
+  - token VARCHAR(255) NULL
+
+
+4. Creation et envoi du lien de validation
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : register()
+Moment : juste apres UserModel->create() reussi.
+Action :
+- Construit le lien de validation :
+  {scheme}://{host}/?page=verify&token={token}
+- Le scheme vaut https si $_SERVER['HTTPS'] est actif, sinon http.
+- Le host vient de $_SERVER['HTTP_HOST'].
+- Prepare un email HTML contenant ce lien.
+- Appelle mail($to, $subject, $body, $headerString).
+
+Fichier : camagru/docker/php/custom.ini
+Moment : configuration PHP dans le container.
+Action :
+- Configure sendmail_path="/usr/bin/msmtp -t".
+- Quand PHP execute mail(), le message est donc transmis a msmtp.
+
+Fichier : camagru/docker/php/msmtprc.template
+Moment : configuration de msmtp.
+Action :
+- Configure l'envoi SMTP via smtp.gmail.com:587.
+- Utilise SMTP_USER et SMTP_PASS.
+
+Fichier : camagru/docker-compose.yml
+Moment : lancement des services Docker.
+Action :
+- Passe SMTP_USER et SMTP_PASS au service app.
+- Lance aussi le service db dont depend l'application.
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : register()
+Moment : apres tentative d'envoi du mail.
+Action si mail envoye :
+- Si AJAX : renvoie JSON { success: true }.
+- Sinon : redirige vers /?page=registerinprogress.
+
+Action si mail non envoye :
+- Si AJAX : renvoie JSON { success: false, message: "Erreur lors de l'envoi du mail." }.
+- Sinon : redirige vers /?page=register&error=...
+
+Fichier : camagru/src/public/js/pages/register.js
+Moment : reception du JSON apres inscription AJAX.
+Action :
+- Si data.success vaut true :
+  - redirige le navigateur vers /?page=registerinprogress.
+- Sinon :
+  - affiche le message d'erreur dans #registerMsg.
+
+Fichier : camagru/src/app/Controllers/PageController.php
+Methode : registerinprogress()
+Moment : affichage de /?page=registerinprogress.
+Action :
+- Retourne "registerinprogress.php".
+
+Fichier : camagru/src/app/Views/registerinprogress.php
+Moment : apres inscription reussie.
+Action :
+- Affiche un message indiquant que le compte est cree.
+- Demande a l'utilisateur d'ouvrir sa boite mail et de cliquer sur le lien.
+- Propose un lien vers la page login.
+
+
+5. Clic sur le lien de validation
+
+URL recue dans l'email :
+/?page=verify&token=TOKEN
+
+Fichier : camagru/src/public/index.php
+Moment : clic sur le lien depuis la boite mail.
+Action :
+- Recommence le cycle normal :
+  - session_start()
+  - database.php
+  - routes.php
+  - Router->handleRequest()
+
+Fichier : camagru/src/config/routes.php
+Moment : resolution de la route verify.
+Action :
+- Envoie vers AuthController::verify().
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : verify()
+Moment : reception de /?page=verify&token=...
+Action :
+- Recupere $_GET['token'].
+- Si aucun token :
+  - retourne "verify_failed.php".
+- Sinon :
+  - appelle UserModel->confirmAccount($token).
+
+Fichier : camagru/src/app/Models/UserModel.php
+Methode : confirmAccount($token)
+Moment : verification du token.
+Action :
+- Cherche un utilisateur avec :
+  - token = ?
+  - is_verified = 0
+- Si trouve :
+  - met is_verified a 1.
+  - met token a NULL.
+  - retourne true si l'UPDATE reussit.
+- Si non trouve :
+  - retourne false.
+- Le lien devient inutilisable apres validation car token passe a NULL.
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : verify()
+Moment : apres confirmAccount().
+Action :
+- Si true :
+  - retourne "verify_success.php".
+- Sinon :
+  - retourne "verify_failed.php".
+
+Fichier : camagru/src/app/Views/verify_success.php
+Moment : validation reussie.
+Action :
+- Affiche que l'inscription est confirmee.
+- Propose un lien data-page="login" pour se connecter.
+
+Fichier : camagru/src/app/Views/verify_failed.php
+Moment : validation echouee.
+Action :
+- Affiche que le lien est invalide ou deja utilise.
+- Propose un retour a l'accueil.
+
+
+6. Affichage de la page de connexion
+
+URL : /?page=login
+
+Fichier : camagru/src/config/routes.php
+Moment : resolution de la route login.
+Action :
+- Envoie vers AuthController::login().
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : login()
+Moment : requete GET sur /?page=login.
+Action :
+- Comme la requete n'est pas POST, retourne "login.php".
+
+Fichier : camagru/src/app/Views/login.php
+Moment : rendu de la vue login.
+Action :
+- Affiche le formulaire de connexion.
+- Le formulaire a id="loginForm".
+- Champs envoyes :
+  - username
+  - password
+- Affiche #loginError si la connexion echoue.
+- Propose un lien data-page="register" vers l'inscription.
+
+Fichier : camagru/src/public/js/router.js
+Moment : quand la page login est affichee.
+Action :
+- Pour login, importe /js/pages/login.js.
+
+Fichier : camagru/src/public/js/pages/login.js
+Moment : initialisation de la page login.
+Action :
+- Trouve #loginForm.
+- Evite une double initialisation avec form.dataset.initialized.
+- Ajoute un listener submit.
+- Envoie les donnees en AJAX vers /?page=login.
+- Ajoute l'en-tete X-Requested-With: XMLHttpRequest.
+- Attend une reponse JSON.
+
+
+7. Soumission du formulaire de connexion
+
+URL : POST /?page=login
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : login()
+Moment : reception du POST login.
+Action :
+- Recupere :
+  - $_POST['username']
+  - $_POST['password']
+- Appelle UserModel->getByUsername($username).
+
+Fichier : camagru/src/app/Models/UserModel.php
+Methode : getByUsername($username)
+Moment : recherche de l'utilisateur.
+Action :
+- Execute :
+  SELECT id, username, email, password, is_verified
+  FROM users
+  WHERE username = ?
+  LIMIT 1
+- Retourne l'utilisateur trouve ou false.
+
+Fichier : camagru/src/app/Controllers/AuthController.php
+Methode : login()
+Moment : apres recuperation de l'utilisateur.
+Action :
+- Verifie trois conditions :
+  - l'utilisateur existe
+  - password_verify($password, $user['password']) est vrai
+  - $user['is_verified'] est vrai
+- Si les trois conditions sont vraies :
+  - cree la session :
+    $_SESSION['user_id'] = $user['id']
+    $_SESSION['username'] = $user['username']
+  - renvoie JSON { success: true }
+- Sinon :
+  - renvoie JSON { success: false, message: "Identifiants incorrects ou compte non verifie." }
+
+Fichier : camagru/src/public/js/pages/login.js
+Moment : reception de la reponse JSON.
+Action si success :
+- Redirige vers /?page=home.
+- Le rechargement complet permet au layout/header de relire la session PHP.
+
+Action si echec :
+- Affiche le message dans #loginError.
+- Reactive le bouton submit.
+
+
+8. Resume rapide du flux complet
+
+1. L'utilisateur ouvre /?page=register.
+2. index.php charge database.php, routes.php et Router.php.
+3. Router appelle AuthController::register().
+4. AuthController retourne register.php.
+5. layout.php affiche la page et charge app.js.
+6. router.js charge js/pages/register.js.
+7. register.js valide le formulaire et POST en AJAX vers /?page=register.
+8. AuthController::register() valide les donnees, genere un token et appelle UserModel::create().
+9. UserModel::create() hache le mot de passe et insere l'utilisateur non verifie en base.
+10. AuthController::register() construit le lien /?page=verify&token=... et envoie le mail.
+11. En cas de succes, register.js redirige vers /?page=registerinprogress.
+12. L'utilisateur clique le lien recu par mail.
+13. Router appelle AuthController::verify().
+14. AuthController::verify() appelle UserModel::confirmAccount().
+15. UserModel::confirmAccount() passe is_verified a 1 et efface le token.
+16. verify_success.php indique que le compte est actif.
+17. L'utilisateur ouvre /?page=login.
+18. login.js POST username/password vers /?page=login.
+19. AuthController::login() recupere l'utilisateur avec UserModel::getByUsername().
+20. Si le mot de passe est bon et is_verified vaut 1, la session est creee.
+21. login.js redirige vers /?page=home.
+
+
+9. Fichiers principaux du parcours
+
+Entree / routage :
+- camagru/src/public/index.php
+- camagru/src/config/routes.php
+- camagru/src/app/Core/Router.php
+
+Connexion base :
+- camagru/src/config/database.php
+- camagru/src/database/init.sql
+
+Controleurs :
+- camagru/src/app/Controllers/AuthController.php
+- camagru/src/app/Controllers/PageController.php
+
+Modele :
+- camagru/src/app/Models/UserModel.php
+
+Vues :
+- camagru/src/app/Views/layout.php
+- camagru/src/app/Views/register.php
+- camagru/src/app/Views/registerinprogress.php
+- camagru/src/app/Views/verify_success.php
+- camagru/src/app/Views/verify_failed.php
+- camagru/src/app/Views/login.php
+
+JavaScript :
+- camagru/src/public/js/app.js
+- camagru/src/public/js/router.js
+- camagru/src/public/js/pages/register.js
+- camagru/src/public/js/pages/login.js
+
+Mail / Docker :
+- camagru/docker/php/custom.ini
+- camagru/docker/php/msmtprc.template
+- camagru/docker-compose.yml

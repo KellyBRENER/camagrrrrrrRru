@@ -16,6 +16,8 @@
         
         <div class="text-center mt-4">
             <a href="#" data-page="register">Pas encore de compte ? Rejoindre la meute !</a>
+            <br>
+            <a href="#" data-page="resend_validation">Renvoyer le lien de validation</a>
         </div>
     </div>
 </div>

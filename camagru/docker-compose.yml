@@ -5,6 +5,7 @@ services:
       - ./src:/var/www/html
     ports:
       - "8081:80"
+      - "8443:443"
     environment:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}

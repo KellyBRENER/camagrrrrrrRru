@@ -29,6 +29,54 @@ class AuthController {
         }
         error_log($line);
     }
+
+    private function buildVerificationLink($token) {
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+
+        return sprintf('%s://%s/?page=verify&token=%s', $scheme, $host, urlencode($token));
+    }
+
+    private function sendVerificationEmail($email, $username, $token) {
+        $link = $this->buildVerificationLink($token);
+        $subject = "Activez votre compte Camagru 🐆";
+
+        $headers = [
+            "From" => "Camagru <no-reply@camagru.com>",
+            "Reply-To" => "no-reply@camagru.com",
+            "Content-Type" => "text/html; charset=UTF-8",
+            "X-Mailer" => "PHP/" . phpversion()
+        ];
+
+        $safeUsername = htmlspecialchars($username, ENT_QUOTES, 'UTF-8');
+        $safeLink = htmlspecialchars($link, ENT_QUOTES, 'UTF-8');
+        $body = "
+            <html>
+            <head>
+                <title>Confirmation d'inscription</title>
+            </head>
+            <body style='font-family: Georgia, serif; background-color: #f5e6d3; padding: 20px;'>
+                <div style='max-width: 600px; margin: 0 auto; background: white; border: 3px solid #8b6f47; border-radius: 15px; padding: 30px;'>
+                    <h1 style='color: #6b4423;'>Bienvenue, $safeUsername !</h1>
+                    <p>Ton compte est presque prêt. Clique sur le lien ci-dessous pour le valider :</p>
+                    <p style='text-align: center; margin: 30px 0;'>
+                        <a href='$safeLink' style='background: #ff8c42; color: white; padding: 15px 25px; text-decoration: none; border-radius: 25px; font-weight: bold; border: 2px solid #6b4423;'>
+                            ACTIVER MON COMPTE
+                        </a>
+                    </p>
+                    <p style='font-size: 0.8rem; color: #8b6f47;'>Si le bouton ne fonctionne pas, copie ce lien : <br> $safeLink</p>
+                </div>
+            </body>
+            </html>
+        ";
+
+        $headerString = "";
+        foreach ($headers as $key => $value) {
+            $headerString .= "$key: $value\r\n";
+        }
+
+        return mail($email, $subject, $body, $headerString);
+    }
     //POST username + mot de passe pour se connecter
     //GET pour afficher le formulaire de connexion
     public function login() {
@@ -119,46 +167,9 @@ class AuthController {
 
             if ($success) {
                 $this->flowLog('register_user_created', ['requestId' => $requestId, 'email' => $email]);
-                $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-                $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-                $link = sprintf('%s://%s/?page=verify&token=%s', $scheme, $host, urlencode($token));
-                $this->flowLog('register_verify_link_built', ['requestId' => $requestId, 'host' => $host]);
+                $this->flowLog('register_verify_link_built', ['requestId' => $requestId, 'host' => $_SERVER['HTTP_HOST'] ?? 'localhost']);
 
-                $to = $email;
-    			$subject = "Activez votre compte Camagru 🐆";
-
-    			$headers = [
-        			"From" => "Camagru <no-reply@camagru.com>",
-        			"Reply-To" => "no-reply@camagru.com",
-        			"Content-Type" => "text/html; charset=UTF-8", // On autorise le HTML et les accents
-        			"X-Mailer" => "PHP/" . phpversion()
-    			];
-				$body = "
-					<html>
-					<head>
-						<title>Confirmation d'inscription</title>
-					</head>
-					<body style='font-family: Georgia, serif; background-color: #f5e6d3; padding: 20px;'>
-						<div style='max-width: 600px; margin: 0 auto; background: white; border: 3px solid #8b6f47; border-radius: 15px; padding: 30px;'>
-            			<h1 style='color: #6b4423;'>Bienvenue, $username !</h1>
-            			<p>Ta tanière est presque prête. Clique sur le lien ci-dessous pour valider ton compte :</p>
-            			<p style='text-align: center; margin: 30px 0;'>
-                			<a href='$link' style='background: #ff8c42; color: white; padding: 15px 25px; text-decoration: none; border-radius: 25px; font-weight: bold; border: 2px solid #6b4423;'>
-                    			ACTIVER MON COMPTE
-                			</a>
-            			</p>
-            			<p style='font-size: 0.8rem; color: #8b6f47;'>Si le bouton ne fonctionne pas, copie ce lien : <br> $link</p>
-        				</div>
-    				</body>
-    				</html>
-    			";
-
-    			$headerString = "";
-    			foreach ($headers as $key => $value) {
-        			$headerString .= "$key: $value\r\n";
-    			}
-
-    			$mailSent = mail($to, $subject, $body, $headerString);
+    			$mailSent = $this->sendVerificationEmail($email, $username, $token);
 
     			if ($mailSent) {
                     $this->flowLog('register_mail_sent', ['requestId' => $requestId, 'to' => $email]);
@@ -196,6 +207,47 @@ class AuthController {
         return "register.php";
     }
 
+    public function resendValidation() {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $email = trim($_POST['email'] ?? '');
+
+            if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                header('Location: /?page=resend_validation&error=' . urlencode('Adresse email invalide.'));
+                exit;
+            }
+
+            $user = $this->userModel->getByEmail($email);
+
+            if (!$user) {
+                header('Location: /?page=resend_validation&error=' . urlencode('Aucun compte ne correspond a cet email.'));
+                exit;
+            }
+
+            if ($user['is_verified']) {
+                header('Location: /?page=resend_validation&success=' . urlencode('Ce compte est deja active. Vous pouvez vous connecter.'));
+                exit;
+            }
+
+            $token = bin2hex(random_bytes(32));
+            $tokenUpdated = $this->userModel->updateVerificationToken($user['id'], $token);
+
+            if (!$tokenUpdated) {
+                header('Location: /?page=resend_validation&error=' . urlencode('Impossible de regenerer le lien de validation.'));
+                exit;
+            }
+
+            if (!$this->sendVerificationEmail($user['email'], $user['username'], $token)) {
+                header('Location: /?page=resend_validation&error=' . urlencode("Erreur lors de l'envoi du mail."));
+                exit;
+            }
+
+            header('Location: /?page=resend_validation&success=' . urlencode('Un nouveau lien de validation vient d\'etre envoye.'));
+            exit;
+        }
+
+        return "resend_validation.php";
+    }
+
 	public function verify() {
 		// 1. On récupère le token dans l'URL (?page=verify&token=...)
 		$token = $_GET['token'] ?? null;
@@ -220,6 +272,6 @@ class AuthController {
 	}
 
     public function studio() {
-        return "pictureStudio.php";
+        return "studio.php";
     }
 }

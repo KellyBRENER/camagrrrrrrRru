@@ -3,12 +3,12 @@
     <p>Votre plateforme de partage de photos personnalisées avec un style félin unique !</p>
     <p>Connectez-vous pour accéder à votre studio de création, partager vos images dans la galerie et rejoindre notre communauté sauvage.</p>
     
-    <div class="mt-4">
+    <div class="home-actions mt-4">
         <?php if (!isset($_SESSION['user_id'])): ?>
-            <a href="#" data-page="register" class="btn-savane me-3">Rejoindre la meute</a>
+            <a href="#" data-page="register" class="btn-savane">Rejoindre la meute</a>
             <a href="#" data-page="login" class="btn-savane-secondary">Se connecter</a>
         <?php else: ?>
-            <a href="#" data-page="studio" class="btn-savane me-3">📸 Studio</a>
+            <a href="#" data-page="studio" class="btn-savane">📸 Studio</a>
             <a href="#" data-page="gallery" class="btn-savane-secondary">🖼️ Galerie</a>
         <?php endif; ?>
     </div>

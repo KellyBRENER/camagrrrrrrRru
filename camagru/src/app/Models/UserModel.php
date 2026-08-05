@@ -11,6 +11,29 @@ class UserModel {
         return $this->lastError;
     }
 
+    public function getByUsername($username) {
+        $sql = "SELECT id, username, email, password, is_verified FROM users WHERE username = ? LIMIT 1";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$username]);
+
+        return $stmt->fetch();
+    }
+
+    public function getByEmail($email) {
+        $sql = "SELECT id, username, email, is_verified FROM users WHERE email = ? LIMIT 1";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$email]);
+
+        return $stmt->fetch();
+    }
+
+    public function updateVerificationToken($userId, $token) {
+        $sql = "UPDATE users SET token = ? WHERE id = ? AND is_verified = 0";
+        $stmt = $this->db->prepare($sql);
+
+        return $stmt->execute([$token, $userId]) && $stmt->rowCount() > 0;
+    }
+
     public function create($username, $email, $password, $token) {
         $this->lastError = null;
 

@@ -1,5 +1,7 @@
 <?php
 session_start();
+header('Permissions-Policy: camera=(self)');
+header("Feature-Policy: camera 'self'");
 
 // On inclut la connexion PDO
 require_once __DIR__ . '/../config/database.php'; 

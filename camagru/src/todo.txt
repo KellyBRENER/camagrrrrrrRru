@@ -6,3 +6,4 @@ lorsqu'on clique sur le lien envoyé par mail, le verify fail
 une fois l'authentification gérée :
 => mettre en place la capture video avec filtre
 
+=> lorsqu'une page n'existe pas dans routes.php, envoyer une page 404 not found + un lien vers l'accueil

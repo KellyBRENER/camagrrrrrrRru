@@ -183,6 +183,264 @@ body.app-shell {
     color: white;
 }
 
+.btn-savane,
+.btn-savane-secondary {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: center;
+}
+
+.home-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+}
+
+.studio-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+}
+
+.home-actions .btn-savane,
+.home-actions .btn-savane-secondary,
+.studio-actions .btn-savane,
+.studio-actions .btn-savane-secondary {
+    white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+    .home-actions,
+    .studio-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .home-actions .btn-savane,
+    .home-actions .btn-savane-secondary,
+    .studio-actions .btn-savane,
+    .studio-actions .btn-savane-secondary,
+    .savane-card .btn-savane,
+    .savane-card .btn-savane-secondary,
+    .form-savane .btn-savane,
+    .form-savane .btn-savane-secondary {
+        width: 100%;
+        text-align: center;
+        white-space: normal;
+    }
+}
+
+/* --- Studio --- */
+.studio-main,
+.studio-side {
+    min-width: 0;
+}
+
+.studio-preview {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    height: clamp(240px, 42vw, 400px);
+    overflow: hidden;
+    background: #000;
+    border-radius: 10px;
+}
+
+.studio-preview video,
+.studio-preview canvas,
+.studio-preview img {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    border-radius: 10px;
+    object-fit: cover;
+}
+
+.studio-preview canvas {
+    display: none;
+}
+
+.studio-preview.is-cropping {
+    cursor: grab;
+    touch-action: none;
+}
+
+.studio-preview.is-cropping:active {
+    cursor: grabbing;
+}
+
+.studio-preview.is-cropping img {
+    max-width: none;
+    object-fit: fill;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.is-crop-modal-open {
+    overflow: hidden;
+}
+
+.studio-crop-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(12px, 3vw, 28px);
+    background: rgba(20, 15, 10, 0.78);
+}
+
+.studio-crop-modal[hidden] {
+    display: none;
+}
+
+.studio-crop-dialog {
+    width: min(920px, 100%);
+    max-height: min(92vh, 900px);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: clamp(16px, 3vw, 24px);
+    overflow: auto;
+    background: linear-gradient(145deg, #f5e6d3 0%, #e8d4a7 100%);
+    border: 3px solid var(--savane-brown);
+    border-radius: 12px;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+}
+
+.studio-crop-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.studio-crop-header h3 {
+    margin: 0;
+    color: var(--savane-dark);
+    font-size: clamp(1.25rem, 2vw, 1.7rem);
+}
+
+.studio-crop-header p {
+    margin: 6px 0 0;
+    color: var(--savane-brown);
+}
+
+.studio-crop-close {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    display: grid;
+    place-items: center;
+    border: 2px solid var(--savane-brown);
+    border-radius: 50%;
+    background: #fff8ec;
+    color: var(--savane-dark);
+    font-size: 1.8rem;
+    line-height: 1;
+}
+
+.studio-crop-frame-wrap {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+.studio-crop-frame {
+    position: relative;
+    width: min(100%, 760px);
+    max-height: 58vh;
+    overflow: hidden;
+    background: #000;
+    border: 4px solid var(--sunset-orange);
+    border-radius: 10px;
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.75);
+    cursor: grab;
+    touch-action: none;
+}
+
+.studio-crop-frame:active {
+    cursor: grabbing;
+}
+
+.studio-crop-frame img {
+    position: absolute;
+    inset: 0;
+    display: block;
+    max-width: none;
+    object-fit: fill;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.studio-crop-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.studio-crop-zoom {
+    display: grid;
+    grid-template-columns: 44px auto minmax(120px, 1fr) 44px;
+    align-items: center;
+    gap: 12px;
+}
+
+.studio-crop-zoom label {
+    margin: 0;
+    color: var(--savane-dark);
+    font-weight: bold;
+}
+
+.studio-crop-zoom input[type="range"] {
+    width: 100%;
+    accent-color: var(--sunset-orange);
+}
+
+.studio-crop-zoom .btn-savane-secondary {
+    width: 44px;
+    min-width: 44px;
+    height: 40px;
+    padding: 0;
+    font-size: 1.35rem;
+    line-height: 1;
+}
+
+@media (max-width: 480px) {
+    .studio-crop-dialog {
+        max-height: 94vh;
+    }
+
+    .studio-crop-header {
+        gap: 10px;
+    }
+
+    .studio-crop-actions {
+        align-items: stretch;
+        flex-direction: column-reverse;
+    }
+
+    .studio-crop-actions .btn-savane,
+    .studio-crop-actions .btn-savane-secondary {
+        width: 100%;
+    }
+
+    .studio-crop-zoom {
+        grid-template-columns: 44px 1fr 44px;
+    }
+
+    .studio-crop-zoom label {
+        grid-column: 1 / -1;
+    }
+}
+
 /* --- Formulaires style savane --- */
 .auth-container {
     width: 90%;

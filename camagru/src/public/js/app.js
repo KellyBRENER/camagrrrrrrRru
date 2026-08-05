@@ -1,7 +1,7 @@
-import { loadPage, router, setActiveFooterTab } from './utils.js';
+import { loadPage, router, setActiveFooterTab } from './router.js';
 
 // Liste des pages autorisées
-const allowedPages = ['home', 'studio', 'gallery', 'setup'];
+//const allowedPages = ['home', 'studio', 'gallery', 'setup'];
 
 function applyResponsiveShellSizes() {
     const root = document.documentElement;

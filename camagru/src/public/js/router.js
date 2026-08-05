@@ -17,20 +17,23 @@ function loadPageScript(page) {
         login: 'login',
         profil: 'profil',
         register: 'register',
-        studio: 'pictureStudio'
+        studio: 'studio'
     };
     const scriptName = pageScripts[page];
     if (!scriptName) {
         return;
     }
 
+    console.info('[ROUTER] loading page script', { page, scriptName });
+
     import(`/js/pages/${scriptName}.js`)
         .then(module => {
             if (module.init) {
+                console.info('[ROUTER] init page script', { page, scriptName });
                 module.init();
             }
         })
-        .catch(err => console.log("Pas de JS spécifique pour cette page"));
+        .catch(err => console.error("impossible de charger le script de la page", err));
 }
 
 // utils.js - fonctions utilitaires pour l'application
