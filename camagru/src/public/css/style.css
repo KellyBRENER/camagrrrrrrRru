@@ -242,7 +242,8 @@ body.app-shell {
     position: relative;
     width: 100%;
     max-width: 100%;
-    height: clamp(240px, 42vw, 400px);
+    aspect-ratio: 1 / 1;
+    max-height: min(70vh, 640px);
     overflow: hidden;
     background: #000;
     border-radius: 10px;
@@ -261,8 +262,77 @@ body.app-shell {
     object-fit: cover;
 }
 
+.studio-preview video,
+#capturedPhotoPreview {
+    z-index: 1;
+}
+
 .studio-preview canvas {
     display: none;
+    z-index: 2;
+}
+
+.studio-filter-overlay {
+    z-index: 4;
+    pointer-events: none;
+    object-fit: fill;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.studio-filter-overlay.is-sticker {
+    height: auto;
+    max-width: none;
+    pointer-events: auto;
+    cursor: grab;
+    touch-action: none;
+}
+
+.studio-filter-overlay.is-sticker:active {
+    cursor: grabbing;
+}
+
+.studio-sticker-box {
+    position: absolute;
+    z-index: 5;
+    border: 2px dashed rgba(255, 255, 255, 0.95);
+    border-radius: 8px;
+    box-shadow: 0 0 0 1px rgba(20, 15, 10, 0.72), 0 8px 22px rgba(0, 0, 0, 0.22);
+    cursor: move;
+    touch-action: none;
+    user-select: none;
+}
+
+.studio-sticker-box[hidden] {
+    display: none;
+}
+
+.studio-sticker-box img {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    display: block;
+    max-width: none;
+    border-radius: 0 !important;
+    object-fit: contain !important;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.studio-sticker-resize {
+    position: absolute;
+    right: -11px;
+    bottom: -11px;
+    width: 22px;
+    height: 22px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: var(--sunset-orange);
+    box-shadow: 0 0 0 1px rgba(20, 15, 10, 0.75);
+    cursor: nwse-resize;
+    touch-action: none;
 }
 
 .studio-preview.is-cropping {
@@ -377,6 +447,125 @@ body.app-shell {
     object-fit: fill;
     user-select: none;
     -webkit-user-drag: none;
+}
+
+#cropImage {
+    z-index: 1;
+}
+
+.studio-crop-filter-overlay {
+    width: 100%;
+    height: 100%;
+    z-index: 3;
+    pointer-events: none;
+    object-fit: fill;
+    transform: none;
+}
+
+.studio-crop-filter-overlay.is-sticker {
+    height: auto;
+    pointer-events: auto;
+    cursor: grab;
+    touch-action: none;
+}
+
+.studio-crop-filter-overlay.is-sticker:active {
+    cursor: grabbing;
+}
+
+.studio-crop-sticker-box {
+    z-index: 4;
+}
+
+.studio-filter-option {
+    width: 116px;
+    min-height: 132px;
+    display: grid;
+    grid-template-rows: 82px auto;
+    gap: 8px;
+    align-items: center;
+    justify-items: center;
+    padding: 9px;
+    border: 2px solid var(--savane-brown);
+    border-radius: 8px;
+    background: rgba(255, 248, 236, 0.92);
+    color: var(--savane-dark);
+    font-weight: bold;
+    line-height: 1.15;
+    text-align: center;
+    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.studio-filter-section + .studio-filter-section {
+    margin-top: 18px;
+}
+
+.studio-filter-section h4 {
+    margin: 0 0 10px;
+    color: var(--savane-dark);
+    font-size: 1rem;
+    font-weight: bold;
+}
+
+.studio-filter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.studio-filter-option:hover,
+.studio-filter-option:focus-visible {
+    transform: translateY(-2px);
+    border-color: var(--sunset-orange);
+    box-shadow: 0 6px 14px rgba(107, 68, 35, 0.28);
+    outline: none;
+}
+
+.studio-filter-option.is-selected {
+    border-color: var(--sunset-orange);
+    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.28);
+}
+
+.studio-filter-option img {
+    width: 82px;
+    height: 82px;
+    display: block;
+    object-fit: contain;
+    background:
+        linear-gradient(45deg, #d8d8d8 25%, transparent 25%),
+        linear-gradient(-45deg, #d8d8d8 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #d8d8d8 75%),
+        linear-gradient(-45deg, transparent 75%, #d8d8d8 75%);
+    background-color: #f8f8f8;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-size: 16px 16px;
+    border-radius: 6px;
+}
+
+.studio-filter-option span {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-size: 0.9rem;
+}
+
+.studio-filters-empty {
+    width: 100%;
+    margin: 0;
+    color: var(--savane-brown);
+}
+
+.studio-sticker-controls {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+
+.studio-sticker-controls[hidden] {
+    display: none;
+}
+
+.studio-sticker-controls .btn-savane-secondary {
+    padding: 8px 12px;
 }
 
 .studio-crop-actions {

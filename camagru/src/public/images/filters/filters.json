@@ -1,0 +1,14 @@
+[
+  {
+    "id": "leopard-frame",
+    "name": "Cadre leopard",
+    "file": "/images/filters/leopard-frame.png",
+    "type": "frame"
+  },
+  {
+    "id": "leopard-sticker",
+    "name": "Leopard",
+    "file": "/images/filters/leopard-sticker.png",
+    "type": "sticker"
+  }
+]

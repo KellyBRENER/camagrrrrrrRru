@@ -23,8 +23,18 @@
         
         <div class="savane-card mt-3">
             <h3>Filtres disponibles</h3>
-            <div id="filtersList" class="d-flex flex-wrap gap-2">
-                <!-- Les filtres seront chargés ici -->
+            <div class="studio-filter-section">
+                <h4>Cadres</h4>
+                <div id="frameFiltersList" class="studio-filter-list">
+                    <!-- Les cadres seront chargés ici -->
+                </div>
+            </div>
+
+            <div class="studio-filter-section">
+                <h4>Stickers</h4>
+                <div id="stickerFiltersList" class="studio-filter-list">
+                    <!-- Les stickers seront chargés ici -->
+                </div>
             </div>
         </div>
     </div>

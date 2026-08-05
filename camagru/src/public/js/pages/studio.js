@@ -14,6 +14,8 @@ export async function init() {
     const video = document.getElementById("webcam");
     const canvas = document.getElementById("overlay");
     const preview = document.getElementById("cameraPreview");
+    const frameFiltersList = document.getElementById("frameFiltersList");
+    const stickerFiltersList = document.getElementById("stickerFiltersList");
     const cropModal = document.getElementById("imageCropModal");
     const cropFrame = document.getElementById("cropFrame");
     const cropImage = document.getElementById("cropImage");
@@ -27,11 +29,237 @@ export async function init() {
     let stream = null;
     let uploadedImageUrl = null;
     let cropState = null;
+    let selectedFilter = null;
+    const stickerState = {
+        x: 50,
+        y: 50,
+        width: 62,
+        isDragging: false,
+        isResizing: false,
+        pointerId: null,
+        dragStartX: 0,
+        dragStartY: 0,
+        startX: 50,
+        startY: 50,
+        startWidth: 62
+    };
 
-    if (!captureBtn || !cropBtn || !uploadBtn || !uploadInput || !video || !canvas || !preview || !cropModal || !cropFrame || !cropImage || !validateCropBtn || !cancelCropBtn || !cancelCropAction || !cropZoomRange || !zoomCropIn || !zoomCropOut) {
+    if (!captureBtn || !cropBtn || !uploadBtn || !uploadInput || !video || !canvas || !preview || !frameFiltersList || !stickerFiltersList || !cropModal || !cropFrame || !cropImage || !validateCropBtn || !cancelCropBtn || !cancelCropAction || !cropZoomRange || !zoomCropIn || !zoomCropOut) {
         console.error("La page studio n'a pas tous les éléments attendus.");
         return;
     }
+
+    const previewFilterOverlay = document.createElement("img");
+    previewFilterOverlay.id = "selectedFilterPreview";
+    previewFilterOverlay.className = "studio-filter-overlay";
+    previewFilterOverlay.alt = "Filtre sélectionné";
+    previewFilterOverlay.hidden = true;
+    preview.appendChild(previewFilterOverlay);
+
+    const previewStickerBox = document.createElement("div");
+    previewStickerBox.className = "studio-sticker-box";
+    previewStickerBox.hidden = true;
+    const previewStickerImage = document.createElement("img");
+    previewStickerImage.alt = "Sticker sélectionné";
+    const previewStickerHandle = document.createElement("span");
+    previewStickerHandle.className = "studio-sticker-resize";
+    previewStickerHandle.setAttribute("aria-hidden", "true");
+    previewStickerBox.append(previewStickerImage, previewStickerHandle);
+    preview.appendChild(previewStickerBox);
+
+    const cropFilterOverlay = document.createElement("img");
+    cropFilterOverlay.id = "selectedFilterCropPreview";
+    cropFilterOverlay.className = "studio-crop-filter-overlay";
+    cropFilterOverlay.alt = "Filtre sélectionné";
+    cropFilterOverlay.hidden = true;
+    cropFrame.appendChild(cropFilterOverlay);
+
+    const cropStickerBox = document.createElement("div");
+    cropStickerBox.className = "studio-sticker-box studio-crop-sticker-box";
+    cropStickerBox.hidden = true;
+    const cropStickerImage = document.createElement("img");
+    cropStickerImage.alt = "Sticker sélectionné";
+    const cropStickerHandle = document.createElement("span");
+    cropStickerHandle.className = "studio-sticker-resize";
+    cropStickerHandle.setAttribute("aria-hidden", "true");
+    cropStickerBox.append(cropStickerImage, cropStickerHandle);
+    cropFrame.appendChild(cropStickerBox);
+
+    const stickerControls = document.createElement("div");
+    stickerControls.className = "studio-sticker-controls";
+    stickerControls.hidden = true;
+
+    const resetStickerBtn = document.createElement("button");
+    resetStickerBtn.type = "button";
+    resetStickerBtn.className = "btn-savane-secondary";
+    resetStickerBtn.textContent = "Recentrer";
+
+    stickerControls.append(resetStickerBtn);
+    stickerFiltersList.after(stickerControls);
+
+    const canCaptureFromCamera = () => Boolean(stream && video.videoWidth && video.videoHeight && selectedFilter);
+
+    const syncCaptureButtonState = () => {
+        captureBtn.disabled = !canCaptureFromCamera();
+    };
+
+    const isStickerSelected = () => selectedFilter?.type === "sticker";
+
+    const applyStickerPosition = (box) => {
+        box.style.left = `${stickerState.x}%`;
+        box.style.top = `${stickerState.y}%`;
+        box.style.width = `${stickerState.width}%`;
+        box.style.transform = "translate(-50%, -50%)";
+    };
+
+    const applyFramePosition = (overlay) => {
+        overlay.style.left = "0";
+        overlay.style.top = "0";
+        overlay.style.width = "100%";
+        overlay.style.height = "100%";
+        overlay.style.transform = "none";
+        overlay.style.objectFit = "fill";
+    };
+
+    const syncStickerControls = () => {
+        stickerControls.hidden = !isStickerSelected();
+    };
+
+    const syncFilterOverlays = () => {
+        const hasFilter = Boolean(selectedFilter);
+
+        previewFilterOverlay.hidden = !hasFilter;
+        cropFilterOverlay.hidden = !hasFilter;
+        previewStickerBox.hidden = true;
+        cropStickerBox.hidden = true;
+
+        if (!hasFilter) {
+            previewFilterOverlay.removeAttribute("src");
+            cropFilterOverlay.removeAttribute("src");
+            previewStickerImage.removeAttribute("src");
+            cropStickerImage.removeAttribute("src");
+            previewFilterOverlay.classList.remove("is-sticker");
+            cropFilterOverlay.classList.remove("is-sticker");
+            syncStickerControls();
+            return;
+        }
+
+        const sticker = isStickerSelected();
+
+        if (sticker) {
+            previewFilterOverlay.hidden = true;
+            cropFilterOverlay.hidden = true;
+            previewStickerBox.hidden = false;
+            cropStickerBox.hidden = false;
+            previewStickerImage.src = selectedFilter.file;
+            cropStickerImage.src = selectedFilter.file;
+            applyStickerPosition(previewStickerBox);
+            applyStickerPosition(cropStickerBox);
+        } else {
+            previewFilterOverlay.hidden = false;
+            cropFilterOverlay.hidden = false;
+            previewFilterOverlay.src = selectedFilter.file;
+            cropFilterOverlay.src = selectedFilter.file;
+            applyFramePosition(previewFilterOverlay);
+            applyFramePosition(cropFilterOverlay);
+        }
+
+        syncStickerControls();
+    };
+
+    const selectFilter = (filter) => {
+        selectedFilter = filter;
+
+        if (filter.type === "sticker") {
+            stickerState.x = 50;
+            stickerState.y = 50;
+            stickerState.width = 62;
+        }
+
+        syncFilterOverlays();
+        syncCaptureButtonState();
+
+        document.querySelectorAll(".studio-filter-option").forEach((button) => {
+            const isSelected = button.dataset.filterId === filter.id;
+            button.classList.toggle("is-selected", isSelected);
+            button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        });
+    };
+
+    const loadFilters = async () => {
+        frameFiltersList.innerHTML = '<p class="studio-filters-empty">Chargement des cadres...</p>';
+        stickerFiltersList.innerHTML = '<p class="studio-filters-empty">Chargement des stickers...</p>';
+
+        try {
+            const response = await fetch("/images/filters/filters.json", {
+                headers: { "Accept": "application/json" }
+            });
+
+            if (!response.ok) {
+                throw new Error("FILTERS_UNAVAILABLE");
+            }
+
+            const filters = await response.json();
+            frameFiltersList.innerHTML = "";
+            stickerFiltersList.innerHTML = "";
+
+            if (!Array.isArray(filters) || filters.length === 0) {
+                frameFiltersList.innerHTML = '<p class="studio-filters-empty">Aucun cadre disponible.</p>';
+                stickerFiltersList.innerHTML = '<p class="studio-filters-empty">Aucun sticker disponible.</p>';
+                return;
+            }
+
+            const counts = {
+                frame: 0,
+                sticker: 0
+            };
+
+            filters.forEach((filter) => {
+                if (!filter.id || !filter.name || !filter.file) {
+                    return;
+                }
+
+                const type = filter.type === "sticker" ? "sticker" : "frame";
+
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "studio-filter-option";
+                button.dataset.filterId = filter.id;
+                button.dataset.filterType = type;
+                button.setAttribute("aria-pressed", "false");
+
+                const thumbnail = document.createElement("img");
+                thumbnail.src = filter.file;
+                thumbnail.alt = "";
+
+                const label = document.createElement("span");
+                label.textContent = filter.name;
+
+                button.append(thumbnail, label);
+                button.addEventListener("click", () => selectFilter({ ...filter, type }));
+
+                if (type === "sticker") {
+                    stickerFiltersList.appendChild(button);
+                    counts.sticker += 1;
+                } else {
+                    frameFiltersList.appendChild(button);
+                    counts.frame += 1;
+                }
+            });
+
+            if (counts.frame === 0) {
+                frameFiltersList.innerHTML = '<p class="studio-filters-empty">Aucun cadre disponible.</p>';
+            }
+
+            if (counts.sticker === 0) {
+                stickerFiltersList.innerHTML = '<p class="studio-filters-empty">Aucun sticker disponible.</p>';
+            }
+        } catch (error) {
+            console.error("[STUDIO] impossible de charger les filtres", error);
+            frameFiltersList.innerHTML = '<p class="studio-filters-empty">Impossible de charger les cadres.</p>';
+            stickerFiltersList.innerHTML = '<p class="studio-filters-empty">Impossible de charger les stickers.</p>';
+        }
+    };
 
     const getCameraStream = (constraints) => {
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -75,6 +303,7 @@ export async function init() {
         preview.classList.remove("is-cropping");
         closeCropModal();
         cropState = null;
+        syncFilterOverlays();
     };
 
     const showCameraPreview = () => {
@@ -92,6 +321,8 @@ export async function init() {
         preview.classList.remove("is-cropping");
         closeCropModal();
         cropState = null;
+        syncFilterOverlays();
+        syncCaptureButtonState();
     };
 
     const clampCropPosition = () => {
@@ -199,8 +430,9 @@ export async function init() {
         video.style.display = "none";
         canvas.style.display = "none";
         cropBtn.hidden = true;
-        captureBtn.disabled = true;
+        syncCaptureButtonState();
         preview.classList.add("is-cropping");
+        syncFilterOverlays();
     };
 
     const validateImageCrop = () => {
@@ -259,7 +491,7 @@ export async function init() {
         }
 
         if (stream) {
-            captureBtn.disabled = false;
+            syncCaptureButtonState();
         }
     };
 
@@ -302,7 +534,7 @@ export async function init() {
             // permettra de couper la caméra lorsqu'on change de page
             window.currentStream = stream;
 
-            captureBtn.disabled = false;
+            syncCaptureButtonState();
 
         } catch (err) {
 
@@ -321,6 +553,11 @@ export async function init() {
     captureBtn.addEventListener("click", () => {
         if (!stream || !video.videoWidth || !video.videoHeight) {
             alert("Démarrez la caméra avant de capturer une photo.");
+            return;
+        }
+
+        if (!selectedFilter) {
+            alert("Choisissez un filtre avant de capturer une photo.");
             return;
         }
 
@@ -396,9 +633,84 @@ export async function init() {
         }
 
         event.preventDefault();
-        const direction = event.deltaY > 0 ? -1 : 1;
-        setCropZoom(cropState.zoom + direction * 0.08);
+            const direction = event.deltaY > 0 ? -1 : 1;
+            setCropZoom(cropState.zoom + direction * 0.08);
     }, { passive: false });
+
+    const startStickerDrag = (event) => {
+        if (!isStickerSelected()) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        stickerState.isDragging = true;
+        stickerState.pointerId = event.pointerId;
+        stickerState.dragStartX = event.clientX;
+        stickerState.dragStartY = event.clientY;
+        stickerState.startX = stickerState.x;
+        stickerState.startY = stickerState.y;
+        event.currentTarget.setPointerCapture(event.pointerId);
+    };
+
+    const startStickerResize = (event) => {
+        if (!isStickerSelected()) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        stickerState.isResizing = true;
+        stickerState.pointerId = event.pointerId;
+        stickerState.dragStartX = event.clientX;
+        stickerState.dragStartY = event.clientY;
+        stickerState.startWidth = stickerState.width;
+        event.currentTarget.setPointerCapture(event.pointerId);
+    };
+
+    const moveStickerDrag = (event, container) => {
+        if (!stickerState.isDragging || stickerState.pointerId !== event.pointerId || !isStickerSelected()) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = container.getBoundingClientRect();
+        const deltaX = ((event.clientX - stickerState.dragStartX) / rect.width) * 100;
+        const deltaY = ((event.clientY - stickerState.dragStartY) / rect.height) * 100;
+
+        stickerState.x = Math.min(110, Math.max(-10, stickerState.startX + deltaX));
+        stickerState.y = Math.min(110, Math.max(-10, stickerState.startY + deltaY));
+        syncFilterOverlays();
+    };
+
+    const moveStickerResize = (event, container) => {
+        if (!stickerState.isResizing || stickerState.pointerId !== event.pointerId || !isStickerSelected()) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = container.getBoundingClientRect();
+        const deltaX = ((event.clientX - stickerState.dragStartX) / rect.width) * 100;
+        const deltaY = ((event.clientY - stickerState.dragStartY) / rect.height) * 100;
+        const deltaWidth = (deltaX + deltaY) / 2;
+
+        stickerState.width = Math.min(130, Math.max(18, stickerState.startWidth + deltaWidth));
+        syncFilterOverlays();
+    };
+
+    const stopStickerDrag = (event) => {
+        if ((!stickerState.isDragging && !stickerState.isResizing) || stickerState.pointerId !== event.pointerId) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        stickerState.isDragging = false;
+        stickerState.isResizing = false;
+        stickerState.pointerId = null;
+    };
 
     cropFrame.addEventListener("pointerup", () => {
         if (cropState) {
@@ -412,6 +724,37 @@ export async function init() {
             cropState.isDragging = false;
             cropState.pointerId = null;
         }
+    });
+
+    previewStickerBox.addEventListener("pointerdown", startStickerDrag);
+    previewStickerBox.addEventListener("pointermove", (event) => {
+        moveStickerDrag(event, preview);
+        moveStickerResize(event, preview);
+    });
+    previewStickerBox.addEventListener("pointerup", stopStickerDrag);
+    previewStickerBox.addEventListener("pointercancel", stopStickerDrag);
+    previewStickerHandle.addEventListener("pointerdown", startStickerResize);
+    previewStickerHandle.addEventListener("pointermove", (event) => moveStickerResize(event, preview));
+    previewStickerHandle.addEventListener("pointerup", stopStickerDrag);
+    previewStickerHandle.addEventListener("pointercancel", stopStickerDrag);
+
+    cropStickerBox.addEventListener("pointerdown", startStickerDrag);
+    cropStickerBox.addEventListener("pointermove", (event) => {
+        moveStickerDrag(event, cropFrame);
+        moveStickerResize(event, cropFrame);
+    });
+    cropStickerBox.addEventListener("pointerup", stopStickerDrag);
+    cropStickerBox.addEventListener("pointercancel", stopStickerDrag);
+    cropStickerHandle.addEventListener("pointerdown", startStickerResize);
+    cropStickerHandle.addEventListener("pointermove", (event) => moveStickerResize(event, cropFrame));
+    cropStickerHandle.addEventListener("pointerup", stopStickerDrag);
+    cropStickerHandle.addEventListener("pointercancel", stopStickerDrag);
+
+    resetStickerBtn.addEventListener("click", () => {
+        stickerState.x = 50;
+        stickerState.y = 50;
+        stickerState.width = 62;
+        syncFilterOverlays();
     });
 
     cropBtn.addEventListener("click", validateImageCrop);
@@ -437,5 +780,8 @@ export async function init() {
             cancelImageCrop();
         }
     });
+
+    loadFilters();
+    syncCaptureButtonState();
 
 }
