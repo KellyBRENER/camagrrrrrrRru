@@ -24,6 +24,9 @@ logs:
 ps:
 	docker compose ps
 
+permissions:
+	docker compose exec $(PHP_SERVICE) sh -c "mkdir -p public/uploads/photos && chmod -R 777 public/uploads"
+
 # =========================
 # CONTAINER ACCESS
 # =========================
@@ -51,6 +54,7 @@ reset:
 	docker compose down -v
 	docker compose up -d
 	sleep 5
+	docker compose exec $(PHP_SERVICE) sh -c "mkdir -p public/uploads/photos && chmod -R 777 public/uploads"
 	docker compose exec $(PHP_SERVICE) php config/setup.php
 
 finaldown:
@@ -62,4 +66,6 @@ finaldown:
 
 start: up
 	sleep 10
+	make permissions
 	make setup
+	make logs

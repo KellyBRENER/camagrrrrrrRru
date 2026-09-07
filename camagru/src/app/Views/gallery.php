@@ -3,8 +3,38 @@
     <p>Découvrez les créations félines de notre communauté !</p>
 </div>
 
-<div id="galleryContainer" class="row g-3">
-    <!-- Les images seront chargées ici via JavaScript -->
+<section class="savane-card gallery-search-panel" aria-labelledby="gallerySearchTitle">
+    <h3 id="gallerySearchTitle">Recherche par mot-clé</h3>
+    <form id="gallerySearchForm" class="gallery-search-form">
+        <label for="gallerySearchInput" class="visually-hidden">Mot-clé</label>
+        <input type="search" id="gallerySearchInput" class="form-control" maxlength="25" placeholder="ex : leopard">
+        <button type="submit" class="btn-savane">Rechercher</button>
+        <button type="button" id="galleryResetSearch" class="btn-savane-secondary" hidden>Tout afficher</button>
+    </form>
+    <div id="galleryHashtagSuggestions" class="gallery-hashtag-suggestions" aria-live="polite"></div>
+    <p id="gallerySearchStatus" class="gallery-search-status" aria-live="polite"></p>
+</section>
+
+<div id="galleryContainer" class="gallery-grid" aria-live="polite">
+    <p class="gallery-empty">Chargement de la galerie...</p>
+</div>
+
+<div id="galleryViewerModal" class="studio-crop-modal" hidden>
+    <div class="studio-photo-viewer" role="dialog" aria-modal="true" aria-labelledby="galleryViewerTitle">
+        <div class="studio-crop-header">
+            <div>
+                <h3 id="galleryViewerTitle">Montage</h3>
+                <p id="galleryViewerCounter"></p>
+            </div>
+            <button type="button" id="closeGalleryViewer" class="studio-crop-close" aria-label="Fermer">×</button>
+        </div>
+
+        <div class="studio-photo-viewer-frame">
+            <button type="button" id="prevGalleryViewer" class="studio-photo-nav studio-photo-nav-prev" aria-label="Photo précédente">‹</button>
+            <img id="galleryViewerImage" alt="Montage sélectionné">
+            <button type="button" id="nextGalleryViewer" class="studio-photo-nav studio-photo-nav-next" aria-label="Photo suivante">›</button>
+        </div>
+    </div>
 </div>
 
 <?php

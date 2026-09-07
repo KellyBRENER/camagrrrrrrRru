@@ -2,13 +2,67 @@
   {
     "id": "leopard-frame",
     "name": "Cadre leopard",
-    "file": "/images/filters/leopard-frame.png",
+    "file": "/images/filters/frames/leopard-frame.png",
+    "type": "frame"
+  },
+  {
+    "id": "pale-leopard-frame",
+    "name": "Cadre leopard pale",
+    "file": "/images/filters/frames/pale-leopard-frame.png",
     "type": "frame"
   },
   {
     "id": "leopard-sticker",
     "name": "Leopard",
-    "file": "/images/filters/leopard-sticker.png",
+    "file": "/images/filters/stickers/leopard-sticker.png",
+    "type": "sticker"
+  },
+  {
+    "id": "leopard-cub-sticker",
+    "name": "Bebe leopard",
+    "file": "/images/filters/stickers/leopard-cub-sticker.png",
+    "type": "sticker"
+  },
+  {
+    "id": "lion-profile-sticker",
+    "name": "Lion",
+    "file": "/images/filters/stickers/lion-profile-sticker.png",
+    "type": "sticker"
+  },
+  {
+    "id": "kitten-sticker",
+    "name": "Chaton",
+    "file": "/images/filters/stickers/kitten-sticker.png",
+    "type": "sticker"
+  },
+  {
+    "id": "simba-friends-sticker",
+    "name": "Trio savane",
+    "file": "/images/filters/stickers/simba-friends-sticker.png",
+    "type": "sticker"
+  },
+  {
+    "id": "black-cat-sticker",
+    "name": "Chat noir",
+    "file": "/images/filters/stickers/black-cat-sticker.png",
+    "type": "sticker"
+  },
+  {
+    "id": "angry-cat-sticker",
+    "name": "Chat furieux",
+    "file": "/images/filters/stickers/angry-cat-sticker.png",
+    "type": "sticker"
+  },
+  {
+    "id": "scared-kitten-sticker",
+    "name": "Chat herisse",
+    "file": "/images/filters/stickers/scared-kitten-sticker.png",
+    "type": "sticker"
+  },
+  {
+    "id": "meowing-cat-sticker",
+    "name": "Chat miauleur",
+    "file": "/images/filters/stickers/meowing-cat-sticker.png",
     "type": "sticker"
   }
 ]

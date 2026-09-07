@@ -25,26 +25,54 @@ export async function init() {
     const cropZoomRange = document.getElementById("cropZoomRange");
     const zoomCropIn = document.getElementById("zoomCropIn");
     const zoomCropOut = document.getElementById("zoomCropOut");
+    const createMontageBtn = document.getElementById("createMontage");
+    const createMontageStatus = document.getElementById("createMontageStatus");
+    const photoHashtagsInput = document.getElementById("photoHashtags");
+    const hashtagsModal = document.getElementById("hashtagsModal");
+    const hashtagsMontageStatus = document.getElementById("hashtagsMontageStatus");
+    const validateHashtagsBtn = document.getElementById("validateHashtagsPhoto");
+    const cancelHashtagsBtn = document.getElementById("cancelHashtagsPhoto");
+    const cancelHashtagsAction = document.getElementById("cancelHashtagsAction");
+    const myGallery = document.getElementById("myGallery");
+    const photoViewerModal = document.getElementById("photoViewerModal");
+    const photoViewerImage = document.getElementById("photoViewerImage");
+    const photoViewerCounter = document.getElementById("photoViewerCounter");
+    const closePhotoViewerBtn = document.getElementById("closePhotoViewer");
+    const prevPhotoViewerBtn = document.getElementById("prevPhotoViewer");
+    const nextPhotoViewerBtn = document.getElementById("nextPhotoViewer");
 
     let stream = null;
     let uploadedImageUrl = null;
     let cropState = null;
-    let selectedFilter = null;
+    let currentGalleryIndex = 0;
+    let selectedFrame = null;
+    let activeStickerUid = null;
+    let nextLayerUid = 1;
+    const layers = [];
+    const stickerInstances = [];
+    const createdPhotos = [];
+    const acceptedUploadTypes = ["image/png", "image/jpeg"];
+    const maxUploadSize = 10 * 1024 * 1024;
+    const maxStickers = 10;
     const stickerState = {
         x: 50,
         y: 50,
         width: 62,
         isDragging: false,
         isResizing: false,
+        isRotating: false,
         pointerId: null,
         dragStartX: 0,
         dragStartY: 0,
         startX: 50,
         startY: 50,
-        startWidth: 62
+        startWidth: 62,
+        startRotation: 0,
+        startAngle: 0,
+        resizeCorner: "br"
     };
 
-    if (!captureBtn || !cropBtn || !uploadBtn || !uploadInput || !video || !canvas || !preview || !frameFiltersList || !stickerFiltersList || !cropModal || !cropFrame || !cropImage || !validateCropBtn || !cancelCropBtn || !cancelCropAction || !cropZoomRange || !zoomCropIn || !zoomCropOut) {
+    if (!startBtn || !captureBtn || !cropBtn || !uploadBtn || !uploadInput || !video || !canvas || !preview || !frameFiltersList || !stickerFiltersList || !cropModal || !cropFrame || !cropImage || !validateCropBtn || !cancelCropBtn || !cancelCropAction || !cropZoomRange || !zoomCropIn || !zoomCropOut || !createMontageBtn || !createMontageStatus || !photoHashtagsInput || !hashtagsModal || !hashtagsMontageStatus || !validateHashtagsBtn || !cancelHashtagsBtn || !cancelHashtagsAction || !myGallery || !photoViewerModal || !photoViewerImage || !photoViewerCounter || !closePhotoViewerBtn || !prevPhotoViewerBtn || !nextPhotoViewerBtn) {
         console.error("La page studio n'a pas tous les éléments attendus.");
         return;
     }
@@ -56,17 +84,6 @@ export async function init() {
     previewFilterOverlay.hidden = true;
     preview.appendChild(previewFilterOverlay);
 
-    const previewStickerBox = document.createElement("div");
-    previewStickerBox.className = "studio-sticker-box";
-    previewStickerBox.hidden = true;
-    const previewStickerImage = document.createElement("img");
-    previewStickerImage.alt = "Sticker sélectionné";
-    const previewStickerHandle = document.createElement("span");
-    previewStickerHandle.className = "studio-sticker-resize";
-    previewStickerHandle.setAttribute("aria-hidden", "true");
-    previewStickerBox.append(previewStickerImage, previewStickerHandle);
-    preview.appendChild(previewStickerBox);
-
     const cropFilterOverlay = document.createElement("img");
     cropFilterOverlay.id = "selectedFilterCropPreview";
     cropFilterOverlay.className = "studio-crop-filter-overlay";
@@ -74,42 +91,36 @@ export async function init() {
     cropFilterOverlay.hidden = true;
     cropFrame.appendChild(cropFilterOverlay);
 
-    const cropStickerBox = document.createElement("div");
-    cropStickerBox.className = "studio-sticker-box studio-crop-sticker-box";
-    cropStickerBox.hidden = true;
-    const cropStickerImage = document.createElement("img");
-    cropStickerImage.alt = "Sticker sélectionné";
-    const cropStickerHandle = document.createElement("span");
-    cropStickerHandle.className = "studio-sticker-resize";
-    cropStickerHandle.setAttribute("aria-hidden", "true");
-    cropStickerBox.append(cropStickerImage, cropStickerHandle);
-    cropFrame.appendChild(cropStickerBox);
+    const getCapturedImage = () => document.getElementById("capturedPhotoPreview");
 
-    const stickerControls = document.createElement("div");
-    stickerControls.className = "studio-sticker-controls";
-    stickerControls.hidden = true;
+    const hasSelectedFilter = () => Boolean(selectedFrame || stickerInstances.length > 0);
 
-    const resetStickerBtn = document.createElement("button");
-    resetStickerBtn.type = "button";
-    resetStickerBtn.className = "btn-savane-secondary";
-    resetStickerBtn.textContent = "Recentrer";
+    const canCaptureFromCamera = () => Boolean(stream && video.videoWidth && video.videoHeight);
 
-    stickerControls.append(resetStickerBtn);
-    stickerFiltersList.after(stickerControls);
+    const canCreateMontage = () => Boolean(getCapturedImage()?.src && hasSelectedFilter());
 
-    const canCaptureFromCamera = () => Boolean(stream && video.videoWidth && video.videoHeight && selectedFilter);
+    const isLocalTrustedHost = () => ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 
     const syncCaptureButtonState = () => {
         captureBtn.disabled = !canCaptureFromCamera();
+        createMontageBtn.disabled = !canCreateMontage();
+        startBtn.classList.toggle("is-active", Boolean(stream));
+        startBtn.setAttribute("aria-pressed", stream ? "true" : "false");
     };
 
-    const isStickerSelected = () => selectedFilter?.type === "sticker";
+    const getActiveSticker = () => stickerInstances.find((sticker) => sticker.uid === activeStickerUid) || null;
 
-    const applyStickerPosition = (box) => {
-        box.style.left = `${stickerState.x}%`;
-        box.style.top = `${stickerState.y}%`;
-        box.style.width = `${stickerState.width}%`;
-        box.style.transform = "translate(-50%, -50%)";
+    const isStickerSelected = () => Boolean(getActiveSticker());
+
+    const getLayerIndex = (uid) => layers.findIndex((layer) => layer.uid === uid);
+
+    const applyStickerPosition = (sticker, box) => {
+        box.style.left = `${sticker.x}%`;
+        box.style.top = `${sticker.y}%`;
+        box.style.width = `${sticker.width}%`;
+        box.style.transform = `translate(-50%, -50%) rotate(${sticker.rotation}deg)`;
+        box.style.zIndex = String(5 + Math.max(0, getLayerIndex(sticker.uid)));
+        box.classList.toggle("is-active", sticker.uid === activeStickerUid);
     };
 
     const applyFramePosition = (overlay) => {
@@ -121,69 +132,187 @@ export async function init() {
         overlay.style.objectFit = "fill";
     };
 
-    const syncStickerControls = () => {
-        stickerControls.hidden = !isStickerSelected();
+    const syncFilterButtons = () => {
+        document.querySelectorAll(".studio-filter-option").forEach((button) => {
+            const isSelectedFrame = Boolean(selectedFrame && button.dataset.filterId === selectedFrame.id);
+            const isUsedSticker = stickerInstances.some((sticker) => button.dataset.filterId === sticker.id);
+            const isSelected = isSelectedFrame || isUsedSticker;
+
+            button.classList.toggle("is-selected", isSelected);
+            button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+        });
+    };
+
+    const syncStickerInstance = (sticker) => {
+        applyStickerPosition(sticker, sticker.previewBox);
+        applyStickerPosition(sticker, sticker.cropBox);
     };
 
     const syncFilterOverlays = () => {
-        const hasFilter = Boolean(selectedFilter);
+        const hasFrame = Boolean(selectedFrame);
 
-        previewFilterOverlay.hidden = !hasFilter;
-        cropFilterOverlay.hidden = !hasFilter;
-        previewStickerBox.hidden = true;
-        cropStickerBox.hidden = true;
+        previewFilterOverlay.hidden = !hasFrame;
+        cropFilterOverlay.hidden = !hasFrame;
 
-        if (!hasFilter) {
+        if (!hasFrame) {
             previewFilterOverlay.removeAttribute("src");
             cropFilterOverlay.removeAttribute("src");
-            previewStickerImage.removeAttribute("src");
-            cropStickerImage.removeAttribute("src");
-            previewFilterOverlay.classList.remove("is-sticker");
-            cropFilterOverlay.classList.remove("is-sticker");
-            syncStickerControls();
-            return;
-        }
-
-        const sticker = isStickerSelected();
-
-        if (sticker) {
-            previewFilterOverlay.hidden = true;
-            cropFilterOverlay.hidden = true;
-            previewStickerBox.hidden = false;
-            cropStickerBox.hidden = false;
-            previewStickerImage.src = selectedFilter.file;
-            cropStickerImage.src = selectedFilter.file;
-            applyStickerPosition(previewStickerBox);
-            applyStickerPosition(cropStickerBox);
         } else {
             previewFilterOverlay.hidden = false;
             cropFilterOverlay.hidden = false;
-            previewFilterOverlay.src = selectedFilter.file;
-            cropFilterOverlay.src = selectedFilter.file;
+            previewFilterOverlay.src = selectedFrame.file;
+            cropFilterOverlay.src = selectedFrame.file;
+            previewFilterOverlay.style.zIndex = String(5 + Math.max(0, getLayerIndex(selectedFrame.uid)));
+            cropFilterOverlay.style.zIndex = String(5 + Math.max(0, getLayerIndex(selectedFrame.uid)));
             applyFramePosition(previewFilterOverlay);
             applyFramePosition(cropFilterOverlay);
         }
 
-        syncStickerControls();
+        stickerInstances.forEach(syncStickerInstance);
+        previewFilterOverlay.classList.remove("is-sticker");
+        cropFilterOverlay.classList.remove("is-sticker");
+        syncFilterButtons();
     };
 
-    const selectFilter = (filter) => {
-        selectedFilter = filter;
+    const removeLayer = (uid) => {
+        const index = layers.findIndex((layer) => layer.uid === uid);
 
-        if (filter.type === "sticker") {
-            stickerState.x = 50;
-            stickerState.y = 50;
-            stickerState.width = 62;
+        if (index !== -1) {
+            layers.splice(index, 1);
+        }
+    };
+
+    const removeSticker = (uid) => {
+        const index = stickerInstances.findIndex((sticker) => sticker.uid === uid);
+
+        if (index === -1) {
+            return;
+        }
+
+        const [sticker] = stickerInstances.splice(index, 1);
+        sticker.previewBox.remove();
+        sticker.cropBox.remove();
+        removeLayer(uid);
+
+        if (activeStickerUid === uid) {
+            activeStickerUid = stickerInstances.at(-1)?.uid || null;
         }
 
         syncFilterOverlays();
         syncCaptureButtonState();
+    };
 
-        document.querySelectorAll(".studio-filter-option").forEach((button) => {
-            const isSelected = button.dataset.filterId === filter.id;
-            button.classList.toggle("is-selected", isSelected);
-            button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+    const createStickerBox = (sticker, cropMode = false) => {
+        const box = document.createElement("div");
+        box.className = cropMode ? "studio-sticker-box studio-crop-sticker-box" : "studio-sticker-box";
+        box.dataset.stickerUid = String(sticker.uid);
+
+        const image = document.createElement("img");
+        image.src = sticker.file;
+        image.alt = "Sticker sélectionné";
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "studio-sticker-remove";
+        removeBtn.textContent = "×";
+        removeBtn.setAttribute("aria-label", "Retirer ce sticker");
+        removeBtn.addEventListener("pointerdown", (event) => event.stopPropagation());
+        removeBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            removeSticker(sticker.uid);
         });
+
+        const rotateHandle = document.createElement("span");
+        rotateHandle.className = "studio-sticker-rotate";
+        rotateHandle.setAttribute("aria-hidden", "true");
+        rotateHandle.addEventListener("pointerdown", startStickerRotate);
+        rotateHandle.addEventListener("pointermove", (event) => moveStickerRotate(event, cropMode ? cropFrame : preview));
+        rotateHandle.addEventListener("pointerup", stopStickerDrag);
+        rotateHandle.addEventListener("pointercancel", stopStickerDrag);
+
+        const handles = ["tl", "tr", "bl", "br"].map((corner) => {
+            const handle = document.createElement("span");
+            handle.className = `studio-sticker-resize studio-sticker-resize-${corner}`;
+            handle.dataset.corner = corner;
+            handle.setAttribute("aria-hidden", "true");
+            handle.addEventListener("pointerdown", startStickerResize);
+            handle.addEventListener("pointermove", (event) => moveStickerResize(event, cropMode ? cropFrame : preview));
+            handle.addEventListener("pointerup", stopStickerDrag);
+            handle.addEventListener("pointercancel", stopStickerDrag);
+            return handle;
+        });
+
+        box.append(image, removeBtn, rotateHandle, ...handles);
+        box.addEventListener("pointerdown", startStickerDrag);
+        box.addEventListener("pointermove", (event) => {
+            moveStickerDrag(event, cropMode ? cropFrame : preview);
+            moveStickerResize(event, cropMode ? cropFrame : preview);
+            moveStickerRotate(event, cropMode ? cropFrame : preview);
+        });
+        box.addEventListener("pointerup", stopStickerDrag);
+        box.addEventListener("pointercancel", stopStickerDrag);
+
+        return box;
+    };
+
+    const addSticker = (filter) => {
+        if (stickerInstances.length >= maxStickers) {
+            alert("Vous pouvez ajouter 10 stickers maximum.");
+            return;
+        }
+
+        const sticker = {
+            uid: nextLayerUid++,
+            type: "sticker",
+            id: filter.id,
+            file: filter.file,
+            x: 50,
+            y: 50,
+            width: 62,
+            rotation: 0
+        };
+
+        sticker.previewBox = createStickerBox(sticker, false);
+        sticker.cropBox = createStickerBox(sticker, true);
+        stickerInstances.push(sticker);
+        layers.push({ uid: sticker.uid, type: "sticker" });
+        activeStickerUid = sticker.uid;
+        preview.appendChild(sticker.previewBox);
+        cropFrame.appendChild(sticker.cropBox);
+        syncFilterOverlays();
+        syncCaptureButtonState();
+    };
+
+    const toggleFrame = (filter) => {
+        if (selectedFrame && selectedFrame.id === filter.id) {
+            removeLayer(selectedFrame.uid);
+            selectedFrame = null;
+        } else {
+            if (selectedFrame) {
+                removeLayer(selectedFrame.uid);
+            }
+
+            selectedFrame = {
+                uid: nextLayerUid++,
+                type: "frame",
+                id: filter.id,
+                file: filter.file
+            };
+            layers.push({ uid: selectedFrame.uid, type: "frame" });
+        }
+
+        syncFilterOverlays();
+        syncCaptureButtonState();
+    };
+
+    const selectFilter = (filter) => {
+        if (filter.type === "sticker") {
+            addSticker(filter);
+            return;
+        }
+
+        toggleFrame(filter);
     };
 
     const loadFilters = async () => {
@@ -304,6 +433,340 @@ export async function init() {
         closeCropModal();
         cropState = null;
         syncFilterOverlays();
+        syncCaptureButtonState();
+    };
+
+    const clearCapturedImage = () => {
+        const image = getCapturedImage();
+        const context = canvas.getContext("2d");
+
+        if (image) {
+            image.removeAttribute("src");
+            image.remove();
+        }
+
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.style.display = "none";
+        cropBtn.hidden = true;
+        preview.classList.remove("is-cropping");
+        closeCropModal();
+        cropState = null;
+
+        if (uploadedImageUrl) {
+            URL.revokeObjectURL(uploadedImageUrl);
+            uploadedImageUrl = null;
+            uploadInput.value = "";
+        }
+
+        if (stream) {
+            video.style.display = "block";
+        }
+
+        syncFilterOverlays();
+        syncCaptureButtonState();
+    };
+
+    const hashtagPattern = /^\p{L}+(?:-\p{L}+)*$/u;
+
+    const parseHashtags = () => photoHashtagsInput.value
+        .split(/[\s,]+/)
+        .map((hashtag) => hashtag.trim())
+        .filter(Boolean)
+        .map((hashtag) => {
+            if ([...hashtag].length > 25) {
+                throw new Error("HASHTAG_TOO_LONG");
+            }
+
+            if (!hashtagPattern.test(hashtag)) {
+                throw new Error("INVALID_HASHTAG");
+            }
+
+            return hashtag.toLocaleLowerCase("fr-FR");
+        });
+
+    const setCreateStatus = (message) => {
+        createMontageStatus.textContent = message;
+        hashtagsMontageStatus.textContent = message;
+    };
+
+    const buildCreatePayload = () => {
+        const image = getCapturedImage();
+
+        if (!image?.src) {
+            throw new Error("IMAGE_MISSING");
+        }
+
+        const hashtags = parseHashtags();
+
+        if (new Set(hashtags).size > 5) {
+            throw new Error("TOO_MANY_HASHTAGS");
+        }
+
+        return {
+            image: image.src,
+            frame_id: selectedFrame?.id || null,
+            crop: {
+                x_percent: 0,
+                y_percent: 0,
+                width_percent: 100,
+                height_percent: 100
+            },
+            layers: layers.map((layer) => {
+                if (layer.type === "frame") {
+                    if (!selectedFrame) {
+                        return null;
+                    }
+
+                    return {
+                        type: "frame",
+                        frame_id: selectedFrame.id
+                    };
+                }
+
+                const sticker = stickerInstances.find((item) => item.uid === layer.uid);
+
+                if (!sticker) {
+                    return null;
+                }
+
+                return {
+                    type: "sticker",
+                    sticker_id: sticker.id,
+                    center_x_percent: sticker.x,
+                    center_y_percent: sticker.y,
+                    width_percent: sticker.width,
+                    rotation_degrees: sticker.rotation
+                };
+            }).filter(Boolean),
+            hashtags
+        };
+    };
+
+    const refreshPhotoViewer = () => {
+        const photo = createdPhotos[currentGalleryIndex];
+
+        if (!photo) {
+            closePhotoViewer();
+            return;
+        }
+
+        photoViewerImage.src = `/${photo.path}`;
+        photoViewerCounter.textContent = `${currentGalleryIndex + 1} / ${createdPhotos.length}`;
+        prevPhotoViewerBtn.disabled = createdPhotos.length <= 1;
+        nextPhotoViewerBtn.disabled = createdPhotos.length <= 1;
+    };
+
+    function openPhotoViewer(index) {
+        currentGalleryIndex = index;
+        refreshPhotoViewer();
+        photoViewerModal.hidden = false;
+        document.body.classList.add("is-crop-modal-open");
+    }
+
+    function closePhotoViewer() {
+        photoViewerModal.hidden = true;
+        photoViewerImage.removeAttribute("src");
+        document.body.classList.remove("is-crop-modal-open");
+    }
+
+    const showPreviousPhoto = () => {
+        if (createdPhotos.length <= 1) {
+            return;
+        }
+
+        currentGalleryIndex = (currentGalleryIndex - 1 + createdPhotos.length) % createdPhotos.length;
+        refreshPhotoViewer();
+    };
+
+    const showNextPhoto = () => {
+        if (createdPhotos.length <= 1) {
+            return;
+        }
+
+        currentGalleryIndex = (currentGalleryIndex + 1) % createdPhotos.length;
+        refreshPhotoViewer();
+    };
+
+    const syncGalleryEmptyState = () => {
+        if (createdPhotos.length === 0) {
+            myGallery.innerHTML = '<p class="studio-gallery-empty">Aucun montage pour le moment.</p>';
+        }
+    };
+
+    const deletePhoto = async (photo, item) => {
+        if (!confirm("Supprimer ce montage ?")) {
+            return;
+        }
+
+        try {
+            const response = await fetch("/?page=photo_delete", {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: JSON.stringify({ photo_id: photo.photo_id })
+            });
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || "DELETE_FAILED");
+            }
+
+            const index = createdPhotos.findIndex((createdPhoto) => String(createdPhoto.photo_id) === String(photo.photo_id));
+
+            if (index !== -1) {
+                createdPhotos.splice(index, 1);
+            }
+
+            item.remove();
+            syncGalleryEmptyState();
+
+            if (!photoViewerModal.hidden) {
+                if (createdPhotos.length === 0) {
+                    closePhotoViewer();
+                } else {
+                    currentGalleryIndex = Math.min(currentGalleryIndex, createdPhotos.length - 1);
+                    refreshPhotoViewer();
+                }
+            }
+        } catch (error) {
+            console.error("[STUDIO] impossible de supprimer le montage", error);
+            alert("Impossible de supprimer ce montage.");
+        }
+    };
+
+    const renderCreatedPhotoItem = (photo, prepend = false) => {
+        const empty = myGallery.querySelector(".studio-gallery-empty");
+
+        if (empty) {
+            empty.remove();
+        }
+
+        const item = document.createElement("div");
+        item.className = "studio-created-photo-item";
+        item.dataset.photoId = String(photo.photo_id);
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "studio-created-photo";
+
+        const image = document.createElement("img");
+        image.src = `/${photo.path}${prepend ? `?t=${Date.now()}` : ""}`;
+        image.alt = "Montage créé";
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "studio-created-photo-delete";
+        deleteBtn.textContent = "🗑";
+        deleteBtn.setAttribute("aria-label", "Supprimer ce montage");
+        deleteBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            deletePhoto(photo, item);
+        });
+
+        button.appendChild(image);
+        button.addEventListener("click", () => {
+            const index = createdPhotos.findIndex((item) => String(item.photo_id) === String(photo.photo_id));
+
+            if (index !== -1) {
+                openPhotoViewer(index);
+            }
+        });
+        item.append(button, deleteBtn);
+
+        if (prepend) {
+            myGallery.prepend(item);
+        } else {
+            myGallery.appendChild(item);
+        }
+    };
+
+    const addCreatedPhotoToGallery = (photo) => {
+        const normalizedPhoto = {
+            photo_id: photo.photo_id,
+            path: photo.path
+        };
+
+        createdPhotos.unshift(normalizedPhoto);
+        renderCreatedPhotoItem(normalizedPhoto, true);
+    };
+
+    const loadUserPhotos = async () => {
+        try {
+            const response = await fetch("/?page=photo_mine", {
+                headers: {
+                    "Accept": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                }
+            });
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || "PHOTOS_LOAD_FAILED");
+            }
+
+            createdPhotos.splice(0, createdPhotos.length, ...(result.photos || []));
+            myGallery.innerHTML = "";
+
+            if (createdPhotos.length === 0) {
+                syncGalleryEmptyState();
+                return;
+            }
+
+            createdPhotos.forEach((photo) => renderCreatedPhotoItem(photo));
+        } catch (error) {
+            console.error("[STUDIO] impossible de charger les montages", error);
+            myGallery.innerHTML = '<p class="studio-gallery-empty">Impossible de charger vos montages.</p>';
+        }
+    };
+
+    const createMontage = async () => {
+        try {
+            const payload = buildCreatePayload();
+            createMontageBtn.disabled = true;
+            validateHashtagsBtn.disabled = true;
+            setCreateStatus("Creation du montage...");
+
+            const response = await fetch("/?page=photo_create", {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || "CREATE_FAILED");
+            }
+
+            addCreatedPhotoToGallery(result);
+            clearCapturedImage();
+            closeHashtagsModal();
+            setCreateStatus("Montage ajoute a vos creations.");
+        } catch (error) {
+            console.error("[STUDIO] impossible de creer le montage", error);
+            if (error.message === "IMAGE_MISSING") {
+                setCreateStatus("Capturez ou recadrez une image avant de creer le montage.");
+            } else if (error.message === "TOO_MANY_HASHTAGS") {
+                setCreateStatus("5 mots-cles maximum : retirez les mots-cles en trop.");
+            } else if (error.message === "HASHTAG_TOO_LONG") {
+                setCreateStatus("Chaque mot-cle doit faire 25 caracteres maximum.");
+            } else if (error.message === "INVALID_HASHTAG") {
+                setCreateStatus("Mots-cles invalides : lettres et tirets uniquement, sans tiret au debut ou a la fin.");
+            } else {
+                setCreateStatus("Impossible de creer le montage.");
+            }
+        } finally {
+            validateHashtagsBtn.disabled = false;
+            syncCaptureButtonState();
+        }
     };
 
     const showCameraPreview = () => {
@@ -366,10 +829,7 @@ export async function init() {
     };
 
     function openCropModal() {
-        const previewWidth = Math.max(1, preview.clientWidth);
-        const previewHeight = Math.max(1, preview.clientHeight);
-
-        cropFrame.style.aspectRatio = `${previewWidth} / ${previewHeight}`;
+        cropFrame.style.aspectRatio = "1 / 1";
         cropModal.hidden = false;
         document.body.classList.add("is-crop-modal-open");
     }
@@ -382,6 +842,18 @@ export async function init() {
             cropFrame.releasePointerCapture(cropState.pointerId);
         }
     }
+
+    const openHashtagsModal = () => {
+        hashtagsMontageStatus.textContent = "";
+        hashtagsModal.hidden = false;
+        document.body.classList.add("is-crop-modal-open");
+        photoHashtagsInput.focus();
+    };
+
+    const closeHashtagsModal = () => {
+        hashtagsModal.hidden = true;
+        document.body.classList.remove("is-crop-modal-open");
+    };
 
     const startImageCrop = (imageUrl) => {
         openCropModal();
@@ -499,8 +971,8 @@ export async function init() {
         console.info("[STUDIO] start camera clicked");
 
         try {
-            if (!window.isSecureContext && window.location.hostname !== "localhost") {
-                alert("La caméra est bloquée sur mobile si le site n'est pas ouvert en HTTPS ou sur localhost.");
+            if (!window.isSecureContext && !isLocalTrustedHost()) {
+                alert("La caméra nécessite HTTPS, ou une adresse locale comme localhost / 127.0.0.1.");
                 return;
             }
 
@@ -544,7 +1016,17 @@ export async function init() {
                 return;
             }
 
-            alert("Impossible d'accéder à la caméra");
+            if (err.name === "NotAllowedError" || err.name === "SecurityError") {
+                alert("Autorisez l'accès à la caméra dans le navigateur, puis réessayez.");
+                return;
+            }
+
+            if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+                alert("Aucune caméra n'a été détectée sur cet appareil.");
+                return;
+            }
+
+            alert("Impossible d'accéder à la caméra.");
 
         }
 
@@ -556,16 +1038,25 @@ export async function init() {
             return;
         }
 
-        if (!selectedFilter) {
-            alert("Choisissez un filtre avant de capturer une photo.");
-            return;
-        }
+        const sourceSize = Math.min(video.videoWidth, video.videoHeight);
+        const sourceX = Math.max(0, (video.videoWidth - sourceSize) / 2);
+        const sourceY = Math.max(0, (video.videoHeight - sourceSize) / 2);
 
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        canvas.width = sourceSize;
+        canvas.height = sourceSize;
 
         const context = canvas.getContext("2d");
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        context.drawImage(
+            video,
+            sourceX,
+            sourceY,
+            sourceSize,
+            sourceSize,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+        );
 
         const imageUrl = canvas.toDataURL("image/png");
         displayCapturedImage(imageUrl);
@@ -582,8 +1073,14 @@ export async function init() {
             return;
         }
 
-        if (!file.type.startsWith("image/")) {
-            alert("Veuillez sélectionner une image.");
+        if (!acceptedUploadTypes.includes(file.type)) {
+            alert("Formats acceptés : PNG ou JPEG.");
+            uploadInput.value = "";
+            return;
+        }
+
+        if (file.size > maxUploadSize) {
+            alert("L'image ne doit pas dépasser 10 Mo.");
             uploadInput.value = "";
             return;
         }
@@ -638,38 +1135,99 @@ export async function init() {
     }, { passive: false });
 
     const startStickerDrag = (event) => {
-        if (!isStickerSelected()) {
+        const sticker = stickerInstances.find((item) => item.uid === Number(event.currentTarget.dataset.stickerUid));
+
+        if (!sticker) {
             return;
         }
 
         event.preventDefault();
         event.stopPropagation();
+        activeStickerUid = sticker.uid;
         stickerState.isDragging = true;
         stickerState.pointerId = event.pointerId;
         stickerState.dragStartX = event.clientX;
         stickerState.dragStartY = event.clientY;
-        stickerState.startX = stickerState.x;
-        stickerState.startY = stickerState.y;
+        stickerState.startX = sticker.x;
+        stickerState.startY = sticker.y;
         event.currentTarget.setPointerCapture(event.pointerId);
+        syncFilterOverlays();
     };
 
     const startStickerResize = (event) => {
-        if (!isStickerSelected()) {
+        const stickerBox = event.currentTarget.closest(".studio-sticker-box");
+        const sticker = stickerInstances.find((item) => item.uid === Number(stickerBox?.dataset.stickerUid));
+
+        if (!sticker) {
             return;
         }
 
         event.preventDefault();
         event.stopPropagation();
+        activeStickerUid = sticker.uid;
         stickerState.isResizing = true;
         stickerState.pointerId = event.pointerId;
         stickerState.dragStartX = event.clientX;
         stickerState.dragStartY = event.clientY;
-        stickerState.startWidth = stickerState.width;
+        stickerState.startWidth = sticker.width;
+        stickerState.resizeCorner = event.currentTarget.dataset.corner || "br";
         event.currentTarget.setPointerCapture(event.pointerId);
+        syncFilterOverlays();
+    };
+
+    const getStickerPointerAngle = (event, container) => {
+        const rect = container.getBoundingClientRect();
+        const sticker = getActiveSticker();
+
+        if (!sticker) {
+            return 0;
+        }
+
+        const centerX = rect.left + (sticker.x / 100) * rect.width;
+        const centerY = rect.top + (sticker.y / 100) * rect.height;
+
+        return Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI;
+    };
+
+    const normalizeRotation = (rotation) => {
+        let normalized = rotation % 360;
+
+        if (normalized > 180) {
+            normalized -= 360;
+        }
+
+        if (normalized < -180) {
+            normalized += 360;
+        }
+
+        return normalized;
+    };
+
+    const startStickerRotate = (event) => {
+        const stickerBox = event.currentTarget.closest(".studio-sticker-box");
+        const sticker = stickerInstances.find((item) => item.uid === Number(stickerBox?.dataset.stickerUid));
+
+        if (!sticker) {
+            return;
+        }
+
+        const container = stickerBox.classList.contains("studio-crop-sticker-box") ? cropFrame : preview;
+
+        event.preventDefault();
+        event.stopPropagation();
+        activeStickerUid = sticker.uid;
+        stickerState.isRotating = true;
+        stickerState.pointerId = event.pointerId;
+        stickerState.startRotation = sticker.rotation;
+        stickerState.startAngle = getStickerPointerAngle(event, container);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        syncFilterOverlays();
     };
 
     const moveStickerDrag = (event, container) => {
-        if (!stickerState.isDragging || stickerState.pointerId !== event.pointerId || !isStickerSelected()) {
+        const sticker = getActiveSticker();
+
+        if (!stickerState.isDragging || stickerState.pointerId !== event.pointerId || !sticker) {
             return;
         }
 
@@ -679,13 +1237,15 @@ export async function init() {
         const deltaX = ((event.clientX - stickerState.dragStartX) / rect.width) * 100;
         const deltaY = ((event.clientY - stickerState.dragStartY) / rect.height) * 100;
 
-        stickerState.x = Math.min(110, Math.max(-10, stickerState.startX + deltaX));
-        stickerState.y = Math.min(110, Math.max(-10, stickerState.startY + deltaY));
-        syncFilterOverlays();
+        sticker.x = Math.min(110, Math.max(-10, stickerState.startX + deltaX));
+        sticker.y = Math.min(110, Math.max(-10, stickerState.startY + deltaY));
+        syncStickerInstance(sticker);
     };
 
     const moveStickerResize = (event, container) => {
-        if (!stickerState.isResizing || stickerState.pointerId !== event.pointerId || !isStickerSelected()) {
+        const sticker = getActiveSticker();
+
+        if (!stickerState.isResizing || stickerState.pointerId !== event.pointerId || !sticker) {
             return;
         }
 
@@ -694,14 +1254,31 @@ export async function init() {
         const rect = container.getBoundingClientRect();
         const deltaX = ((event.clientX - stickerState.dragStartX) / rect.width) * 100;
         const deltaY = ((event.clientY - stickerState.dragStartY) / rect.height) * 100;
-        const deltaWidth = (deltaX + deltaY) / 2;
+        const corner = stickerState.resizeCorner;
+        const horizontal = corner.includes("l") ? -deltaX : deltaX;
+        const vertical = corner.includes("t") ? -deltaY : deltaY;
+        const deltaWidth = (horizontal + vertical) / 2;
 
-        stickerState.width = Math.min(130, Math.max(18, stickerState.startWidth + deltaWidth));
-        syncFilterOverlays();
+        sticker.width = Math.min(130, Math.max(18, stickerState.startWidth + deltaWidth));
+        syncStickerInstance(sticker);
+    };
+
+    const moveStickerRotate = (event, container) => {
+        const sticker = getActiveSticker();
+
+        if (!stickerState.isRotating || stickerState.pointerId !== event.pointerId || !sticker) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const currentAngle = getStickerPointerAngle(event, container);
+        sticker.rotation = normalizeRotation(stickerState.startRotation + currentAngle - stickerState.startAngle);
+        syncStickerInstance(sticker);
     };
 
     const stopStickerDrag = (event) => {
-        if ((!stickerState.isDragging && !stickerState.isResizing) || stickerState.pointerId !== event.pointerId) {
+        if ((!stickerState.isDragging && !stickerState.isResizing && !stickerState.isRotating) || stickerState.pointerId !== event.pointerId) {
             return;
         }
 
@@ -709,6 +1286,7 @@ export async function init() {
         event.stopPropagation();
         stickerState.isDragging = false;
         stickerState.isResizing = false;
+        stickerState.isRotating = false;
         stickerState.pointerId = null;
     };
 
@@ -726,41 +1304,14 @@ export async function init() {
         }
     });
 
-    previewStickerBox.addEventListener("pointerdown", startStickerDrag);
-    previewStickerBox.addEventListener("pointermove", (event) => {
-        moveStickerDrag(event, preview);
-        moveStickerResize(event, preview);
-    });
-    previewStickerBox.addEventListener("pointerup", stopStickerDrag);
-    previewStickerBox.addEventListener("pointercancel", stopStickerDrag);
-    previewStickerHandle.addEventListener("pointerdown", startStickerResize);
-    previewStickerHandle.addEventListener("pointermove", (event) => moveStickerResize(event, preview));
-    previewStickerHandle.addEventListener("pointerup", stopStickerDrag);
-    previewStickerHandle.addEventListener("pointercancel", stopStickerDrag);
-
-    cropStickerBox.addEventListener("pointerdown", startStickerDrag);
-    cropStickerBox.addEventListener("pointermove", (event) => {
-        moveStickerDrag(event, cropFrame);
-        moveStickerResize(event, cropFrame);
-    });
-    cropStickerBox.addEventListener("pointerup", stopStickerDrag);
-    cropStickerBox.addEventListener("pointercancel", stopStickerDrag);
-    cropStickerHandle.addEventListener("pointerdown", startStickerResize);
-    cropStickerHandle.addEventListener("pointermove", (event) => moveStickerResize(event, cropFrame));
-    cropStickerHandle.addEventListener("pointerup", stopStickerDrag);
-    cropStickerHandle.addEventListener("pointercancel", stopStickerDrag);
-
-    resetStickerBtn.addEventListener("click", () => {
-        stickerState.x = 50;
-        stickerState.y = 50;
-        stickerState.width = 62;
-        syncFilterOverlays();
-    });
-
     cropBtn.addEventListener("click", validateImageCrop);
     validateCropBtn.addEventListener("click", validateImageCrop);
     cancelCropBtn.addEventListener("click", cancelImageCrop);
     cancelCropAction.addEventListener("click", cancelImageCrop);
+    createMontageBtn.addEventListener("click", openHashtagsModal);
+    validateHashtagsBtn.addEventListener("click", createMontage);
+    cancelHashtagsBtn.addEventListener("click", closeHashtagsModal);
+    cancelHashtagsAction.addEventListener("click", closeHashtagsModal);
     cropZoomRange.addEventListener("input", () => {
         setCropZoom(Number(cropZoomRange.value) / 100);
     });
@@ -775,13 +1326,45 @@ export async function init() {
             cancelImageCrop();
         }
     });
+    hashtagsModal.addEventListener("click", (event) => {
+        if (event.target === hashtagsModal) {
+            closeHashtagsModal();
+        }
+    });
+    photoViewerModal.addEventListener("click", (event) => {
+        if (event.target === photoViewerModal) {
+            closePhotoViewer();
+        }
+    });
+    closePhotoViewerBtn.addEventListener("click", closePhotoViewer);
+    prevPhotoViewerBtn.addEventListener("click", showPreviousPhoto);
+    nextPhotoViewerBtn.addEventListener("click", showNextPhoto);
     document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !cropModal.hidden) {
-            cancelImageCrop();
+        if (event.key === "Escape") {
+            if (!cropModal.hidden) {
+                cancelImageCrop();
+            }
+
+            if (!hashtagsModal.hidden) {
+                closeHashtagsModal();
+            }
+
+            if (!photoViewerModal.hidden) {
+                closePhotoViewer();
+            }
+        }
+
+        if (!photoViewerModal.hidden && event.key === "ArrowLeft") {
+            showPreviousPhoto();
+        }
+
+        if (!photoViewerModal.hidden && event.key === "ArrowRight") {
+            showNextPhoto();
         }
     });
 
     loadFilters();
+    loadUserPhotos();
     syncCaptureButtonState();
 
 }
