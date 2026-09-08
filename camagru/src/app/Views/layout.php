@@ -1,3 +1,11 @@
+<?php
+$jsRoot = __DIR__ . '/../../public/js';
+$scriptFiles = array_merge(glob($jsRoot . '/*.js'), glob($jsRoot . '/pages/*.js'));
+sort($scriptFiles);
+$scriptVersion = hash('sha256', implode('', array_map(static function ($file) {
+    return hash_file('sha256', $file);
+}, $scriptFiles)));
+?>
 <!doctype html>
 <html lang="fr">
 <head>
@@ -10,10 +18,12 @@
     <link rel="icon" type="image/png" href="/images/favicon.png">
     <script>
         // Configuration transmise de PHP à JS
-        window.userConfig = {
-            isLoggedIn: <?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>,
-            username: "<?php echo $_SESSION['username'] ?? ''; ?>"
-        };
+        window.userConfig = <?php echo json_encode([
+            'isLoggedIn' => isset($_SESSION['user_id']),
+            'username' => $_SESSION['username'] ?? '',
+            'csrfToken' => $_SESSION['csrf_token'],
+            'scriptVersion' => $scriptVersion,
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE); ?>;
     </script>
 </head>
 <body class="app-shell">
@@ -31,7 +41,7 @@
 
     <?php include __DIR__ . '/footer.php'; ?>
 
-    <script type="module" src="/js/app.js"></script>
+    <script type="module" src="/js/app.js?v=<?php echo $scriptVersion; ?>"></script>
 </body>
 
 </html>

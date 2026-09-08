@@ -1,3 +1,5 @@
+import { photoUrl } from "../image-paths.js";
+
 export async function init() {
     console.info("[STUDIO] init");
 
@@ -344,7 +346,8 @@ export async function init() {
             };
 
             filters.forEach((filter) => {
-                if (!filter.id || !filter.name || !filter.file) {
+                if (!filter.id || !filter.name || typeof filter.file !== "string"
+                    || !/^\/images\/filters\/(frames|stickers)\/[a-zA-Z0-9_-]+\.png$/.test(filter.file)) {
                     return;
                 }
 
@@ -550,7 +553,7 @@ export async function init() {
             return;
         }
 
-        photoViewerImage.src = `/${photo.path}`;
+        photoViewerImage.src = photoUrl(photo.path);
         photoViewerCounter.textContent = `${currentGalleryIndex + 1} / ${createdPhotos.length}`;
         prevPhotoViewerBtn.disabled = createdPhotos.length <= 1;
         nextPhotoViewerBtn.disabled = createdPhotos.length <= 1;
@@ -604,6 +607,7 @@ export async function init() {
                 headers: {
                     "Accept": "application/json",
                     "Content-Type": "application/json",
+                    "X-CSRF-Token": window.userConfig.csrfToken,
                     "X-Requested-With": "XMLHttpRequest"
                 },
                 body: JSON.stringify({ photo_id: photo.photo_id })
@@ -653,7 +657,7 @@ export async function init() {
         button.className = "studio-created-photo";
 
         const image = document.createElement("img");
-        image.src = `/${photo.path}${prepend ? `?t=${Date.now()}` : ""}`;
+        image.src = `${photoUrl(photo.path)}${prepend ? `?t=${Date.now()}` : ""}`;
         image.alt = "Montage créé";
 
         const deleteBtn = document.createElement("button");
@@ -699,6 +703,7 @@ export async function init() {
             const response = await fetch("/?page=photo_mine", {
                 headers: {
                     "Accept": "application/json",
+                    "X-CSRF-Token": window.userConfig.csrfToken,
                     "X-Requested-With": "XMLHttpRequest"
                 }
             });
@@ -735,6 +740,7 @@ export async function init() {
                 headers: {
                     "Accept": "application/json",
                     "Content-Type": "application/json",
+                    "X-CSRF-Token": window.userConfig.csrfToken,
                     "X-Requested-With": "XMLHttpRequest"
                 },
                 body: JSON.stringify(payload)

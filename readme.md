@@ -18,10 +18,11 @@ base MariaDB est stockee dans un volume Docker nomme `camagru_db_data`.
 Exemple de variables attendues :
 
 ```env
-MYSQL_ROOT_PASSWORD=rootpassword
+MYSQL_ROOT_PASSWORD=choisir-un-secret-local
 MYSQL_DATABASE=camagru
 SMTP_USER=adresse@example.com
 SMTP_PASS=mot-de-passe
+APP_URL=http://localhost:8081
 ```
 
 ## Lancer le projet
@@ -48,6 +49,43 @@ navigateur.
 
 `make start` existe aussi, mais il suit les logs a la fin et garde donc le terminal
 occupe.
+
+## Sécurité et mot de passe oublié
+
+Le lien de validation reçu à l’inscription affiche un bouton « Activer mon compte ».
+Le compte est activé uniquement à la confirmation en POST protégée par CSRF ;
+ouvrir le lien (ou son aperçu automatique dans un outil de messagerie) ne suffit pas.
+
+Le lien « Mot de passe oublié ? » est accessible depuis la connexion. Les liens
+expirent après 30 minutes, sont utilisables une seule fois et sont remplacés par
+une nouvelle demande (une demande par minute et par compte activé). Le changement
+de mot de passe invalide les sessions précédentes.
+
+`APP_URL` doit être l'adresse à laquelle vous ouvrez le site, par exemple
+`http://localhost:8081` ou `https://<adresse-du-serveur>:8443`. Elle sert aux liens
+contenus dans les emails et ne dépend pas du header HTTP `Host`.
+Les paramètres DB et SMTP sont lus depuis `camagru/.env` ; un modèle sans secrets
+réels est fourni dans `camagru/.env.example`.
+
+Après mise à jour d'une installation existante, depuis `camagru/` :
+
+```bash
+docker compose up -d --build
+make migrate
+```
+
+La migration ajoute la table des liens de réinitialisation sans effacer les
+comptes ni les photos. Une installation neuve avec `make setup` l'applique aussi.
+
+Tests de sécurité et de réinitialisation :
+
+```bash
+make test-security
+```
+
+Ils créent puis suppriment une base temporaire distincte, lancent un serveur PHP
+local et capturent les emails localement. Aucun email SMTP n'est envoyé par ces
+tests. Le nettoyage des messages d'erreur et traces de debug reste à faire.
 
 ## Checker le projet
 
@@ -76,9 +114,9 @@ Verifier la base :
 
 ```bash
 cd camagru
-docker compose exec -T db mariadb -uroot -prootpassword camagru -e "SHOW TABLES;"
-docker compose exec -T db mariadb -uroot -prootpassword camagru -e "SELECT id, username, email, is_verified FROM users;"
-docker compose exec -T db mariadb -uroot -prootpassword camagru -e "SELECT photo_id, user_id, path, created_at FROM photos ORDER BY photo_id DESC;"
+docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" "$@"' sh -e "SHOW TABLES;"
+docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" "$@"' sh -e "SELECT id, username, email, is_verified FROM users;"
+docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" "$@"' sh -e "SELECT photo_id, user_id, path, created_at FROM photos ORDER BY photo_id DESC;"
 ```
 
 Verifier la syntaxe PHP depuis le conteneur :

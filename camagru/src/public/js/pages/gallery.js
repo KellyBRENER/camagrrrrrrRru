@@ -1,3 +1,5 @@
+import { photoUrl } from "../image-paths.js";
+
 export function init() {
     const container = document.getElementById("galleryContainer");
     const searchForm = document.getElementById("gallerySearchForm");
@@ -16,6 +18,15 @@ export function init() {
     let galleryPhotos = [];
     let currentViewerIndex = 0;
     let activeHashtag = "";
+    const pageSize = 12;
+    const previousPage = document.getElementById("galleryPreviousPage");
+    const nextPage = document.getElementById("galleryNextPage");
+    const pageStatus = document.getElementById("galleryPageStatus");
+    const retry = document.getElementById("galleryRetry");
+    let currentPage = 1;
+    let totalPages = 1;
+    let requestVersion = 0;
+    let lastRequest = ["", 1];
 
     if (!container || !searchForm || !searchInput || !searchResetBtn || !suggestions || !searchStatus || !viewerModal || !viewerImage || !viewerCounter || !closeViewerBtn || !prevViewerBtn || !nextViewerBtn) {
         return;
@@ -36,6 +47,7 @@ export function init() {
             ...options,
             headers: {
                 "Accept": "application/json",
+                "X-CSRF-Token": window.userConfig.csrfToken,
                 "X-Requested-With": "XMLHttpRequest",
                 ...(options.headers || {})
             }
@@ -137,7 +149,7 @@ export function init() {
             return;
         }
 
-        viewerImage.src = `/${photo.path}`;
+        viewerImage.src = photoUrl(photo.path);
         viewerImage.alt = `Montage de ${photo.username || "la communaute"}`;
         viewerCounter.textContent = `${currentViewerIndex + 1} / ${galleryPhotos.length}`;
         prevViewerBtn.disabled = galleryPhotos.length <= 1;
@@ -187,7 +199,7 @@ export function init() {
         imageButton.setAttribute("aria-label", "Agrandir le montage");
 
         const image = document.createElement("img");
-        image.src = `/${photo.path}`;
+        image.src = photoUrl(photo.path);
         image.alt = `Montage de ${photo.username || "la communaute"}`;
         image.loading = "lazy";
 
@@ -247,7 +259,8 @@ export function init() {
         const commentsBtn = document.createElement("button");
         commentsBtn.type = "button";
         commentsBtn.className = "gallery-action";
-        commentsBtn.innerHTML = `<i class="bi bi-chat-dots-fill" aria-hidden="true"></i><span class="gallery-action-count">${photo.comments_count || 0}</span>`;
+        commentsBtn.innerHTML = '<i class="bi bi-chat-dots-fill" aria-hidden="true"></i><span class="gallery-action-count"></span>';
+        commentsBtn.querySelector(".gallery-action-count").textContent = String(photo.comments_count || 0);
 
         actions.append(likeBtn, commentsBtn);
 
@@ -352,28 +365,58 @@ export function init() {
         photos.forEach((photo) => container.appendChild(createPhotoCard(photo)));
     };
 
-    const loadGallery = async (hashtag = "") => {
+    const loadGallery = async (hashtag = "", requestedPage = 1) => {
+        const version = ++requestVersion;
+        lastRequest = [hashtag, requestedPage];
+        previousPage.disabled = true;
+        nextPage.disabled = true;
+        retry.hidden = true;
+        container.setAttribute("aria-busy", "true");
         try {
-            const query = hashtag ? `&hashtag=${encodeURIComponent(hashtag)}` : "";
-            const result = await apiJson(`/?page=photo_public_list&limit=30${query}`);
+            const query = new URLSearchParams({ page: "photo_public_list", limit: pageSize,
+                offset: (requestedPage - 1) * pageSize });
+            if (hashtag) query.set("hashtag", hashtag);
+            const result = await apiJson(`/?${query}`);
+            if (version !== requestVersion || !container.isConnected) return;
             const photos = result.photos || [];
+            const pagination = result.pagination;
+            currentPage = Math.floor(pagination.offset / pageSize) + 1;
+            totalPages = Math.max(1, Math.ceil(pagination.total / pageSize));
             activeHashtag = hashtag;
+            searchInput.value = hashtag;
             searchResetBtn.hidden = hashtag === "";
+            closeViewer();
             setSearchStatus(hashtag ? `Résultats pour les mots-clés contenant "${hashtag}"` : "");
             renderGallery(photos, hashtag
                 ? "Aucune photo ne correspond à ce hashtag."
                 : "Aucun montage pour le moment.");
+            pageStatus.textContent = pagination.total === 0 ? "Aucune photo" :
+                `Page ${currentPage} sur ${totalPages} · ${pagination.total} photo${pagination.total > 1 ? "s" : ""}`;
+            const url = new URL(window.location.href);
+            url.searchParams.set("page", "gallery");
+            url.searchParams.set("gallery_page", currentPage);
+            if (hashtag) url.searchParams.set("hashtag", hashtag);
+            else url.searchParams.delete("hashtag");
+            window.history.replaceState({ page: "gallery" }, "", url);
         } catch (error) {
-            console.error("[GALLERY] impossible de charger la galerie", error);
-
-            if (error.message === "Hashtag invalide.") {
-                setSearchStatus("Mot-clé invalide : lettres et tirets uniquement.");
-                renderGallery([], "Aucune photo ne correspond à ce hashtag.");
-            } else {
+            if (version !== requestVersion || !container.isConnected) return;
+            setSearchStatus("Impossible de charger cette page. Réessayez.");
+            retry.hidden = false;
+            if (galleryPhotos.length === 0) {
                 setEmpty("Impossible de charger la galerie.");
+                pageStatus.textContent = "Page indisponible";
+            }
+        } finally {
+            if (version === requestVersion && container.isConnected) {
+                container.setAttribute("aria-busy", "false");
+                previousPage.disabled = currentPage <= 1;
+                nextPage.disabled = currentPage >= totalPages;
             }
         }
     };
+    previousPage.addEventListener("click", () => loadGallery(activeHashtag, currentPage - 1));
+    nextPage.addEventListener("click", () => loadGallery(activeHashtag, currentPage + 1));
+    retry.addEventListener("click", () => loadGallery(...lastRequest));
 
     const loadHashtagSuggestions = async () => {
         try {
@@ -420,7 +463,6 @@ export function init() {
 
     searchResetBtn.addEventListener("click", () => {
         searchInput.value = "";
-        activeHashtag = "";
         loadGallery();
     });
 
@@ -449,5 +491,11 @@ export function init() {
     });
 
     loadHashtagSuggestions();
-    loadGallery(activeHashtag);
+    const initialParams = new URLSearchParams(window.location.search);
+    let initialHashtag = "";
+    try { initialHashtag = validateHashtag(initialParams.get("hashtag") || ""); } catch { /* Ignore invalid bookmarked filters. */ }
+    const initialPageValue = initialParams.get("gallery_page") || "1";
+    const initialPage = /^[1-9][0-9]*$/.test(initialPageValue) && Number(initialPageValue) <= 178956971
+        ? Number(initialPageValue) : 1;
+    loadGallery(initialHashtag, initialPage);
 }

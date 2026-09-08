@@ -72,6 +72,17 @@ class PhotoModel {
         return $stmt->fetch();
     }
 
+    public function countPublicPhotos($hashtag = '') {
+        if ($hashtag === '') {
+            return (int) $this->db->query('SELECT COUNT(*) FROM photos')->fetchColumn();
+        }
+        $stmt = $this->db->prepare('SELECT COUNT(*) FROM photos p WHERE EXISTS (
+            SELECT 1 FROM photo_hashtags ph JOIN hashtags h ON h.hashtag_id = ph.hashtag_id
+            WHERE ph.photo_id = p.photo_id AND h.hashtag LIKE ?)');
+        $stmt->execute(['%' . $this->normalizeHashtag($hashtag) . '%']);
+        return (int) $stmt->fetchColumn();
+    }
+
     public function getPublicPhotos($limit = 5, $offset = 0, $viewerId = null) {
         $limit = max(1, min(50, (int) $limit));
         $offset = max(0, (int) $offset);
@@ -92,7 +103,7 @@ class PhotoModel {
             LEFT JOIN photo_likes l ON l.photo_id = p.photo_id
             LEFT JOIN comments c ON c.photo_id = p.photo_id
             GROUP BY p.photo_id, p.user_id, p.path, p.created_at, u.username
-            ORDER BY p.created_at DESC
+            ORDER BY p.created_at DESC, p.photo_id DESC
             LIMIT $limit OFFSET $offset
         ";
         $stmt = $this->db->prepare($sql);
@@ -131,7 +142,7 @@ class PhotoModel {
             LEFT JOIN comments c ON c.photo_id = p.photo_id
             WHERE h_filter.hashtag LIKE :hashtag
             GROUP BY p.photo_id, p.user_id, p.path, p.created_at, u.username
-            ORDER BY p.created_at DESC
+            ORDER BY p.created_at DESC, p.photo_id DESC
             LIMIT $limit OFFSET $offset
         ";
         $stmt = $this->db->prepare($sql);
@@ -173,10 +184,11 @@ class PhotoModel {
         ";
         $stmt = $this->db->prepare($sql);
 
-        return $stmt->execute([
+        $stmt->execute([
             ':photo_id' => $photoId,
             ':user_id' => $userId
         ]);
+        return $stmt->rowCount() === 1;
     }
 
     public function unlike($photoId, $userId) {
@@ -294,7 +306,7 @@ class PhotoModel {
             INNER JOIN photo_hashtags ph ON ph.photo_id = p.photo_id
             INNER JOIN hashtags h ON h.hashtag_id = ph.hashtag_id
             WHERE h.hashtag = :hashtag
-            ORDER BY p.created_at DESC
+            ORDER BY p.created_at DESC, p.photo_id DESC
             LIMIT $limit OFFSET $offset
         ";
         $stmt = $this->db->prepare($sql);

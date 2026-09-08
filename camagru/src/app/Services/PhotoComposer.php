@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . "/../Core/Validation.php";
 
 class PhotoComposer {
     private const OUTPUT_SIZE = 1024;
@@ -112,10 +113,13 @@ class PhotoComposer {
             throw new InvalidArgumentException('Upload image invalide.');
         }
 
-        if (($file['size'] ?? 0) <= 0 || $file['size'] > self::MAX_SOURCE_BYTES) {
+        if (!is_int($file['size'] ?? null) || $file['size'] <= 0 || $file['size'] > self::MAX_SOURCE_BYTES) {
             throw new InvalidArgumentException('Image source trop volumineuse.');
         }
 
+        if (!is_string($file['tmp_name'] ?? null) || !is_uploaded_file($file['tmp_name'])) {
+            throw new InvalidArgumentException('Upload image invalide.');
+        }
         $bytes = file_get_contents($file['tmp_name']);
 
         return $this->createImageFromBytes($bytes);
@@ -132,6 +136,9 @@ class PhotoComposer {
     }
 
     private function loadRawBase64($base64) {
+        if (strlen($base64) > 4 * (int) ceil(self::MAX_SOURCE_BYTES / 3)) {
+            throw new InvalidArgumentException('Image source trop volumineuse.');
+        }
         $bytes = base64_decode($base64, true);
 
         if ($bytes === false || strlen($bytes) === 0 || strlen($bytes) > self::MAX_SOURCE_BYTES) {
@@ -142,17 +149,24 @@ class PhotoComposer {
     }
 
     private function createImageFromBytes($bytes) {
-        $size = getimagesizefromstring($bytes);
+        if (!is_string($bytes) || $bytes === '') {
+            throw new InvalidArgumentException('Image source illisible.');
+        }
+        $size = @getimagesizefromstring($bytes);
 
         if (!$size || empty($size[0]) || empty($size[1])) {
             throw new InvalidArgumentException('Image source illisible.');
+        }
+
+        if (!in_array($size[2], [IMAGETYPE_PNG, IMAGETYPE_JPEG], true)) {
+            throw new InvalidArgumentException('Seuls les formats PNG et JPEG sont acceptés.');
         }
 
         if ($size[0] * $size[1] > self::MAX_SOURCE_PIXELS) {
             throw new InvalidArgumentException('Image source trop grande.');
         }
 
-        $image = imagecreatefromstring($bytes);
+        $image = @imagecreatefromstring($bytes);
 
         if (!$image) {
             throw new InvalidArgumentException('Image source illisible.');
@@ -161,10 +175,20 @@ class PhotoComposer {
         return $image;
     }
 
-    private function normalizeCrop($crop, $sourceWidth, $sourceHeight) {
-        if (!is_array($crop)) {
-            $crop = [];
+    public function validateCrop($crop) {
+        if (!is_array($crop) || ($crop !== [] && array_is_list($crop))) {
+            throw new InvalidArgumentException('Recadrage invalide.');
         }
+        $validated = [];
+        foreach (['x_percent' => 0, 'y_percent' => 0, 'width_percent' => 100, 'height_percent' => 100] as $key => $default) {
+            $min = in_array($key, ['width_percent', 'height_percent'], true) ? 0.001 : 0;
+            $validated[$key] = Validation::number(array_key_exists($key, $crop) ? $crop[$key] : $default, $min, 100, $key);
+        }
+        return $validated;
+    }
+
+    private function normalizeCrop($crop, $sourceWidth, $sourceHeight) {
+        $crop = $this->validateCrop($crop);
 
         $xPercent = $this->clampFloat($crop['x_percent'] ?? 0, 0, 100);
         $yPercent = $this->clampFloat($crop['y_percent'] ?? 0, 0, 100);
@@ -334,7 +358,7 @@ class PhotoComposer {
     }
 
     private function clampFloat($value, $min, $max) {
-        $value = (float) $value;
+        $value = Validation::number($value, $min, $max, 'Placement');
 
         return min($max, max($min, $value));
     }

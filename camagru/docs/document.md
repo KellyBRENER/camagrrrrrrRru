@@ -8,6 +8,36 @@ sujet".
 
 Source sujet : `camagru.pdf`, version 4.1.
 
+### Mise à jour sécurité et réinitialisation — 2026-09-08
+
+Cette section remplace les anciens constats de sécurité et d'absence de
+réinitialisation plus bas dans ce document.
+
+- Protection CSRF centralisée pour tous les POST, formulaires classiques et appels JSON.
+- Validation email : GET affiche une confirmation ; seul le POST protégé active le compte.
+  La consommation du token est atomique, pour éviter les doubles validations.
+- Déconnexion en POST, toujours en un clic ; cookies HttpOnly/SameSite et renouvellement
+  de session à la connexion. Les sessions antérieures à un changement de mot de passe
+  sont invalidées à leur prochaine requête.
+- Pseudo encodé avec `json_encode` dans le JavaScript ; validation serveur du pseudo,
+  de la longueur de l'email et des mots de passe. Upload limité aux contenus PNG/JPEG.
+- Identifiants DB lus dans l'environnement fourni par `.env` ; liens email fondés sur
+  `APP_URL`, jamais sur le header `Host` envoyé par le client.
+- Routes `forgot_password` et `reset_password`, vues dédiées et lien depuis la connexion.
+- Table `password_resets` : hash SHA-256 du token aléatoire, durée 30 minutes, usage unique,
+  renouvellement limité à une demande par minute et par compte activé.
+- `make migrate` ajoute la table sans reset ; `make setup` applique aussi les migrations.
+- `make test-security` teste le parcours HTTP avec une base temporaire et capture les
+  mails localement. L'acheminement réel par SMTP reste à vérifier avec sa propre adresse.
+- Le nettoyage des erreurs et logs est volontairement reporté. Les secrets éventuellement
+  présents dans l'historique Git ne sont pas purgés par ces modifications ; les anciennes
+  sauvegardes déjà suivies par Git ne sont pas retirées automatiquement.
+
+Fichiers ajoutés : `app/Core/Security.php`, `config/environment.php`, `config/migrate.php`,
+`database/migrations/001_password_resets.sql`, les vues forgot/reset et `tests/security.php`
+(sous `camagru/src/`). Configuration exemple : `camagru/.env.example`.
+
+
 
 ## 1. Resume du projet
 
@@ -241,9 +271,10 @@ Inscription :
 Validation :
 
 - lien : `/?page=verify&token=...` ;
-- `AuthController::verify()` lit le token ;
-- `UserModel::confirmAccount()` cherche `token = ? AND is_verified = 0` ;
-- si trouve : `is_verified = 1`, `token = NULL`.
+- `AuthController::verify()` en GET vérifie le token sans modifier la base et affiche un bouton de confirmation ;
+- le formulaire envoie le token email et le token CSRF en POST vers `/?page=verify` ;
+- après validation CSRF centralisée, `UserModel::confirmAccount()` active le compte et consomme le token par un UPDATE atomique ;
+- un lien déjà utilisé ne peut pas être réutilisé.
 
 Connexion :
 
@@ -270,8 +301,8 @@ Logout :
 
 Attention sujet :
 
-- Le sujet demande aussi le mail de reinitialisation de mot de passe oublie. Ce n'est pas encore implemente.
-- Le sujet demande la modification username/email/password une fois connecte. La vue existe, mais pas encore la logique backend.
+- Le mail de reinitialisation est implemente ; voir la mise a jour du 2026-09-08.
+- La modification username/email/password depuis le profil est implémentée (voir section 7).
 - Le sujet ne demande pas d'interdire les connexions simultanees sur mobile + ordinateur.
 
 
@@ -362,60 +393,57 @@ Pour ajouter un filtre :
 
 ## 6. Galerie et creations
 
-Etat actuel :
+Mis à jour le 2026-09-08.
 
-- `gallery.php` est un squelette public.
-- `gallery.js` est vide.
-- Les tables SQL `photos`, `photo_likes`, `comments`, `hashtags`, `photo_hashtags` existent dans `init.sql`.
-- `PhotoModel.php` fournit les methodes backend de base : creation photo, suppression par proprietaire, listing, likes, commentaires, hashtags.
-- `PhotoModel.php` prepare aussi le chemin relatif `uploads/photos/{user_id}/{photo_id}.png`.
-- `PhotoController.php` expose la route privee `POST /?page=photo_create` pour generer et enregistrer le montage final.
-- Les placements de stickers restent temporaires : ils sont consommes par `PhotoComposer.php`, puis jetes.
-- Pas encore de pagination.
-- Pas encore d'email de notification de commentaire.
-- Le controleur de creation photo existe ; les autres actions galerie/likes/commentaires restent a exposer au navigateur.
-
-Sujet obligatoire :
-
-- galerie publique ;
-- toutes les images editees par tous les users ;
-- tri par date de creation ;
-- likes/commentaires seulement pour utilisateurs connectes ;
-- notification email a l'auteur lors d'un nouveau commentaire ;
-- preference notification activee par defaut mais desactivable ;
-- pagination avec au moins 5 elements par page.
-
-Pour construire cette partie, fichiers probables :
-
-- `src/database/init.sql` : tables deja ajoutees, eventuellement preference notification.
-- `src/app/Models/PhotoModel.php` : modele de base deja ajoute.
-- controleur existant ou nouveau controleur galerie.
-- `gallery.php` + `gallery.js`.
-- routes AJAX/API dediees.
-- `profil.php` pour preference email.
+- Galerie publique : affichage des montages de tous les utilisateurs, likes et commentaires
+  réservés aux utilisateurs connectés, notifications email selon leur préférence.
+- `gallery.php` et `gallery.js` : pagination AJAX de 12 photos avec boutons précédente/
+  suivante, état courant et total. Le filtre hashtag est conservé entre les pages.
+- Une nouvelle recherche ou « Tout afficher » revient à la première page. Page et filtre
+  sont conservés dans `?page=gallery&gallery_page=2&hashtag=chat`, via replaceState, pour
+  permettre rechargement et partage. Les boutons de pagination assurent la navigation ;
+  les changements de page n'ajoutent pas d'entrée à l'historique navigateur.
+- `PhotoController::publicList` renvoie `pagination: {total, limit, offset}` en plus des
+  photos. `PhotoModel::countPublicPhotos` compte les photos filtrées une seule fois même
+  si plusieurs hashtags de la même photo correspondent à la recherche partielle.
+- Tri par created_at DESC puis photo_id DESC pour départager les dates identiques.
+- Une page hors limites revient à la dernière page existante (notamment après suppression).
+- Les contrôles sont désactivés pendant le chargement ; une réponse ancienne ne remplace
+  pas une recherche plus récente. En cas d'erreur, la page courante est conservée et un
+  bouton Réessayer permet de renouveler la requête.
+- La visionneuse parcourt les photos de la page actuellement affichée.
+- Tests : `tests/pagination_cases.php` (HTTP/BDD, dans security.php),
+  `tests/pagination-dom.html` (Chrome, accessible sur /pagination via xss-server.cjs).
+  Résultats : suite serveur 268 contrôles réussis, pagination DOM et régression XSS PASS.
+- La pagination infinie reste un bonus optionnel non implémenté.
 
 
 ## 7. Profil
 
-Etat actuel :
+Mis à jour le 2026-09-08.
 
-- `profil.php` affiche des formulaires username/email/password et une preference notification.
-- `profil.js` est vide.
-- Il n'y a pas de route `profil` dans `routes.php` actuellement.
-- Le footer affiche pourtant un lien `data-page="profil"` si l'utilisateur est connecte.
-
-Sujet obligatoire :
-
-- une fois connecte, l'utilisateur doit pouvoir modifier username, email ou password.
-- la preference de notification email doit etre vraie par defaut et desactivable.
-
-Pour construire :
-
-- ajouter route `profil` privee dans `routes.php`.
-- ajouter methode controleur.
-- ajouter methodes `UserModel` pour update username/email/password/preferences.
-- ajouter colonnes SQL utiles (`email_notifications`, eventuellement `updated_at`).
-- brancher `profil.js` ou POST classiques.
+- `GET /?page=profil` : page privée, préremplie avec les données de l'utilisateur connecté.
+- `POST /?page=profile_update` : modification du pseudo et de l'email, mot de passe actuel requis.
+- `POST /?page=password_update` : ancien mot de passe, nouveau mot de passe et confirmation.
+- Le contrôleur `AuthController` valide les types, longueurs et formats ; `UserModel::updateAccount`
+  effectue la modification en transaction, vérifie le mot de passe sous verrou et gère les doublons.
+- L'identifiant utilisateur vient exclusivement de la session, jamais du formulaire.
+- `profil.php` échappe les valeurs préremplies ; les deux formulaires incluent un jeton CSRF.
+- `profil.js` envoie les formulaires par AJAX et affiche les erreurs avec textContent. Après un
+  succès, rechargement du profil pour actualiser le header, la configuration et les jetons CSRF.
+  Sans JS, POST puis redirection 303 et message de session assurent le même parcours.
+- Le changement de mot de passe renouvelle la session courante et invalide les autres sessions
+  à leur prochaine requête via password_version. Les anciens liens de reset sont supprimés.
+- Le changement d'email annule les anciens liens de reset ; pas de revalidation email ajoutée.
+- Le profil propose un bouton activer/désactiver les emails pour commentaires et likes.
+  `POST /?page=notifications_update`, privé et protégé CSRF, enregistre la préférence
+  `users.email_notifications` (valeur 0/1). Elle est activée par défaut pour tous les comptes.
+- `PhotoNotifications::send` utilise mail()/msmtp après sauvegarde du commentaire ou
+  insertion effective du like. Aucun email au retrait d'un like ; un échec SMTP ne modifie
+  pas l'action enregistrée. La migration 002 ajoute la préférence sans effacer les données.
+- Vérification des notifications : capture locale des messages, opt-out/opt-in et panne
+  d'envoi simulée ; livraison dans une boîte réelle à vérifier avec la configuration SMTP.
+- Tests : `tests/profile_cases.php` et `tests/notification_cases.php`, inclus dans `tests/security.php` (253 contrôles au total).
 
 
 ## 8. Docker, mail et base
@@ -459,7 +487,7 @@ Mail :
 Attention securite :
 
 - Le sujet dit que credentials/env/API keys doivent etre dans `.env` ignore par git.
-- Actuellement plusieurs identifiants DB sont hardcodes (`rootpassword`) dans `database.php`, `setup.php`, `dropdb.php`, `readme.md`.
+- Les scripts PHP lisent les identifiants DB depuis les variables injectees par Compose depuis `.env`.
 - Avant rendu final, il faudra nettoyer cela ou au minimum verifier les exigences d'evaluation.
 
 
@@ -665,42 +693,30 @@ Docker/mail/base :
 
 ## 11. Etat des exigences sujet
 
-Fait ou partiellement fait :
+Etat du code au 2026-09-08 (les parcours UI et l'acheminement réel des emails
+restent à valider en navigateur avant rendu).
 
-- layout header/main/footer : fait.
-- responsive : partiellement fait.
-- Docker compose : fait.
-- inscription : fait.
-- hash password : fait.
-- verification email : fait.
-- login : fait.
-- logout : fait.
-- studio prive : fait.
-- webcam : fait.
-- upload image : fait.
-- filtres alpha : assets presents.
-- selection filtre + bouton capture conditionne : fait cote front.
-- live preview filtre : fait cote front.
+Implémenté :
 
-Manquant ou a finaliser :
+- layout header/main/footer, styles responsive et Docker Compose ;
+- inscription, hash du mot de passe, validation email, connexion et déconnexion ;
+- mot de passe oublié, lien email temporaire et réinitialisation à usage unique ;
+- protection CSRF, encodage du pseudo, sessions et configuration DB via `.env` ;
+- studio privé, webcam, upload PNG/JPEG, filtres alpha et aperçu en direct ;
+- composition finale serveur, sauvegarde et miniatures des créations ;
+- suppression réservée au propriétaire ;
+- galerie publique triée par date, likes/commentaires pour les utilisateurs connectés.
 
-- page 404 au lieu de retour silencieux home.
-- suppression des logs console/server avant rendu final.
-- gestion `.env` propre pour credentials DB/SMTP.
-- mot de passe oublie + reinitialisation email.
-- route et logique profil.
-- modification username/email/password.
-- preference notification email en base.
-- generation finale serveur avec superposition.
-- route/controller de sauvegarde des creations.
-- miniatures "Mes creations".
-- suppression uniquement de ses images.
-- galerie publique reelle.
-- likes/commentaires.
-- notification email de commentaire.
-- pagination galerie minimum 5 par page.
-- protections CSRF plus solides.
-- durcissement upload serveur.
+Mandatory restant :
+
+- route et logique profil : modification username/email/password ;
+- notification email de commentaire et préférence enregistrée, active par défaut ;
+- pagination galerie minimum 5 par page (actuellement limitée aux 30 premiers résultats) ;
+- désactiver la capture webcam tant qu'aucun cadre/sticker n'est sélectionné ;
+- nettoyage des logs et messages d'erreur, validation complète sécurité/responsive/navigateurs.
+
+Avant publication, traiter aussi les anciens secrets et sauvegardes éventuellement
+présents dans l'historique Git. Une page 404 dédiée serait une amélioration utile.
 
 
 ## 12. Points d'attention avant toute modification
@@ -736,11 +752,7 @@ Depuis `camagru/` :
 docker compose exec db mariadb -u root -p
 ```
 
-Mot de passe local actuel :
-
-```text
-rootpassword
-```
+Mot de passe : valeur de `MYSQL_ROOT_PASSWORD` dans votre fichier local `camagru/.env`.
 
 Commandes SQL utiles :
 
@@ -755,7 +767,7 @@ EXIT;
 En une commande :
 
 ```bash
-docker compose exec -T db mariadb -uroot -prootpassword camagru -e "SHOW TABLES;"
+docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" "$@"' sh -e "SHOW TABLES;"
 ```
 
 ### Backups DB
@@ -765,14 +777,14 @@ Creer un dump :
 ```bash
 cd camagru
 mkdir -p backups
-docker compose exec -T db mariadb-dump -uroot -prootpassword camagru > backups/camagru.sql
+docker compose exec -T db sh -c 'exec mariadb-dump -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"'  > backups/camagru.sql
 ```
 
 Restaurer un dump :
 
 ```bash
 cd camagru
-docker compose exec -T db mariadb -uroot -prootpassword camagru < backups/camagru.sql
+docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" "$@"' sh < backups/camagru.sql
 ```
 
 ### Volume MariaDB persistant

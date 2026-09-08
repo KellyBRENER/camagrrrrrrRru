@@ -19,6 +19,13 @@
     <p class="gallery-empty">Chargement de la galerie...</p>
 </div>
 
+<nav class="savane-card d-flex flex-wrap align-items-center justify-content-center gap-3 mt-3" aria-label="Pagination de la galerie">
+    <button type="button" id="galleryPreviousPage" class="btn-savane-secondary" disabled>Page précédente</button>
+    <span id="galleryPageStatus" role="status" tabindex="-1">Chargement...</span>
+    <button type="button" id="galleryNextPage" class="btn-savane-secondary" disabled>Page suivante</button>
+    <button type="button" id="galleryRetry" class="btn-savane-secondary" hidden>Réessayer</button>
+</nav>
+
 <div id="galleryViewerModal" class="studio-crop-modal" hidden>
     <div class="studio-photo-viewer" role="dialog" aria-modal="true" aria-labelledby="galleryViewerTitle">
         <div class="studio-crop-header">

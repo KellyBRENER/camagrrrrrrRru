@@ -40,7 +40,14 @@ class Router {
         $controller = new $controllerName($this->pdo);
         
         // Le contrôleur nous donne le nom du fichier vue (ex: 'home.php')
-        $viewFile = $controller->{$route['method']}();
+        try {
+            $viewFile = $controller->{$route['method']}();
+        } catch (InvalidArgumentException $e) {
+            http_response_code(400);
+            header('Content-Type: application/json; charset=UTF-8');
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            return;
+        }
 
         // C'EST ICI QUE SE FAIT LE CHOIX DU LAYOUT
         $viewPath = __DIR__ . "/../Views/" . $viewFile;

@@ -3,10 +3,10 @@ FROM php:8.2-apache
 # 1. Installations de base (GD, PDO MySQL)
 RUN apt-get update && apt-get install -y \
     libpng-dev \
-    libjpeg-dev \
+    libjpeg-dev libonig-dev \
     msmtp msmtp-mta gettext-base openssl \
     && docker-php-ext-configure gd --with-jpeg \
-    && docker-php-ext-install pdo pdo_mysql gd
+    && docker-php-ext-install pdo pdo_mysql gd mbstring
 
 # 2. Configuration Apache (Rewrite et DocumentRoot)
 RUN a2enmod rewrite ssl

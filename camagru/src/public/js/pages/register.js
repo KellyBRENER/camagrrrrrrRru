@@ -30,9 +30,9 @@ export function init() {
 
         // 4. Vérification personnalisée du mot de passe (Regex)
         const password = form.password.value;
-        const regex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
+        const regex = /^(?=.*[A-Za-z])(?=.*\d)[\s\S]{8,}$/;
         
-        if (!regex.test(password)) {
+        if (!regex.test(password) || new TextEncoder().encode(password).length > 72) {
             console.warn('[REGISTER_FLOW][FRONT] password validation failed');
             showMessage("Le mot de passe doit contenir au moins 8 caractères, dont une lettre et un chiffre.");
             return; // On arrête tout ici si le mot de passe est trop faible

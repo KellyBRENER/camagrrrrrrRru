@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     is_verified BOOLEAN DEFAULT FALSE,
+    email_notifications BOOLEAN NOT NULL DEFAULT TRUE,
     token VARCHAR(255) NULL
 ) ENGINE=InnoDB;
 

@@ -41,6 +41,12 @@ shell:
 setup:
 	docker compose exec $(PHP_SERVICE) php config/setup.php
 
+test-security:
+	docker compose exec -T $(PHP_SERVICE) php tests/security.php
+
+migrate:
+	docker compose exec $(PHP_SERVICE) php config/migrate.php
+
 dropdb:
 	docker compose exec $(PHP_SERVICE) php config/dropdb.php
 

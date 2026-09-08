@@ -1,0 +1,41 @@
+<!doctype html><meta charset="utf-8"><title>Camagru DOM XSS regression</title>
+<div id="content"></div><pre id="results">RUNNING</pre>
+<script type="module">
+import { init } from '/js/pages/gallery.js';
+import { loadPage } from '/js/router.js';
+import { photoUrl } from '/js/image-paths.js';
+const payloads = ["<img src=x onerror=alert('XSS')>", "\">alert('XSS')", '</script' + '><img src=x onerror=alert(1)>'];
+let alerts = 0;
+window.alert = () => alerts++;
+window.userConfig = { isLoggedIn: true, csrfToken: 'test', scriptVersion: 'test' };
+const check = (ok, message) => { if (!ok) throw new Error(message); };
+const tick = () => new Promise(resolve => setTimeout(resolve, 100));
+try {
+    const fixture = await fetch('/fixture').then(r => r.text());
+    document.getElementById('content').innerHTML = fixture; // Trusted repository fixture only.
+    window.fetch = async url => ({ ok: true, json: async () => {
+        if (url.includes('photo_hashtag_list')) return {success: true, hashtags: [{hashtag: payloads[0], photos_count: payloads[1]}]};
+        if (url.includes('photo_comments')) return {success: true, comments: payloads.map(value => ({username: value, comment: value}))};
+        return {success: true, pagination: {total: 3, offset: 0, limit: 12}, photos: payloads.map((value, i) => ({photo_id: i+1, path: 'uploads/photos/1/1.png', username: value, comments_count: value, created_at: '2026-09-08 10:00:00'}))};
+    }});
+    init(); await tick();
+    check(document.querySelectorAll('.gallery-card').length === 3, 'Gallery cards render');
+    check(document.querySelector('.gallery-meta strong').textContent === payloads[0], 'Username preserved as text');
+    check(document.querySelectorAll('.gallery-action-count')[1].textContent === payloads[0], 'API count rendered as text');
+    document.querySelectorAll('.gallery-action')[1].click(); await tick();
+    payloads.forEach((value, i) => check(document.querySelectorAll('.gallery-comment p')[i].textContent === value, 'Comment preserved as text'));
+    check(!document.querySelector('#content [onerror]'), 'No injected event attributes');
+    document.querySelector('.gallery-photo-button').click();
+    check(document.querySelector('#galleryViewerImage').alt.includes(payloads[0]), 'Viewer attribute preserved');
+    ['//evil.test/x', 'javascript:alert(1)', '../x', 'uploads/photos/1/1.png?x'].forEach(path => check(photoUrl(path) === '/images/favicon.png', 'Untrusted URL rejected'));
+    check(photoUrl('uploads/photos/1/1.png') === '/uploads/photos/1/1.png', 'Valid photo URL retained');
+    window.fetch = async () => new Response(JSON.stringify({comment: payloads[0]}), {headers: {'Content-Type': 'application/json'}});
+    loadPage('photo_comments'); await tick();
+    check(document.getElementById('content').textContent === 'Erreur lors du chargement.', 'Router rejects JSON before HTML parsing');
+    window.fetch = async () => new Response('<p>Vue serveur</p>', {headers: {'Content-Type': 'text/html; charset=UTF-8'}});
+    loadPage('forgot_password'); await tick();
+    check(document.getElementById('content').textContent === 'Vue serveur', 'HTML navigation still works');
+    check(alerts === 0, 'No JavaScript payload executed');
+    document.getElementById('results').textContent = 'PASS: gallery, comments, attributes, URLs, router; no alert executed';
+} catch (error) { document.getElementById('results').textContent = 'FAIL: ' + error.message; }
+</script>

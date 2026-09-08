@@ -1,9 +1,7 @@
 <?php
 //ce fichier permet d'initialiser la connexion à la DB pour chaque connexion client
-$host = 'db'; // Nom du service dans ton docker-compose
-$db   = 'camagru';
-$user = 'root';
-$pass = getenv('MYSQL_ROOT_PASSWORD');
+require_once __DIR__ . '/environment.php';
+[$host, $db, $user, $pass] = databaseSettings();
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass, [

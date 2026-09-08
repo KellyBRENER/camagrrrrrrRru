@@ -1,13 +1,17 @@
 <?php
 require_once __DIR__ . '/../Models/PhotoModel.php';
+require_once __DIR__ . '/../Core/Validation.php';
 require_once __DIR__ . '/../Services/PhotoComposer.php';
+require_once __DIR__ . '/../Services/PhotoNotifications.php';
 
 class PhotoController {
     private $photoModel;
     private $composer;
+    private $notifications;
 
     public function __construct($pdo) {
         $this->photoModel = new PhotoModel($pdo);
+        $this->notifications = new PhotoNotifications($pdo);
         $this->composer = new PhotoComposer(__DIR__ . '/../../public');
     }
 
@@ -25,8 +29,9 @@ class PhotoController {
         try {
             $payload = $this->readPayload();
             $sourceImage = $_FILES['image'] ?? $_FILES['photo'] ?? ($payload['image'] ?? $payload['source_image'] ?? null);
-            $crop = $this->readStructuredField($payload, 'crop', []);
+            $crop = $this->composer->validateCrop($this->readStructuredField($payload, 'crop', []));
             $frameId = $payload['frame_id'] ?? $payload['frameId'] ?? null;
+            if ($frameId !== null && $frameId !== '') { Validation::identifier($frameId, 'Cadre'); }
             $hashtags = $this->readStructuredField($payload, 'hashtags', []);
 
             $hashtags = $this->validateRequestedHashtags($hashtags);
@@ -107,7 +112,7 @@ class PhotoController {
         }
 
         $payload = $this->readPayload();
-        $photoId = (int) ($payload['photo_id'] ?? $payload['photoId'] ?? 0);
+        $photoId = Validation::integer($payload['photo_id'] ?? $payload['photoId'] ?? null, 1, 2147483647, 'Photo');
 
         if ($photoId <= 0) {
             http_response_code(400);
@@ -136,14 +141,20 @@ class PhotoController {
             $this->jsonResponse(false, 'Methode non autorisee.');
         }
 
-        $limit = (int) ($_GET['limit'] ?? 20);
-        $offset = (int) ($_GET['offset'] ?? 0);
-        $hashtag = trim((string) ($_GET['hashtag'] ?? ''));
+        $limit = Validation::integer($_GET['limit'] ?? 20, 1, 50, 'Limite');
+        $offset = Validation::integer($_GET['offset'] ?? 0, 0, 2147483647, 'Décalage');
+        $hashtag = trim(Validation::text($_GET['hashtag'] ?? '', 25, 'Hashtag', true));
         $viewerId = $_SESSION['user_id'] ?? null;
 
         if ($hashtag !== '' && (mb_strlen($hashtag, 'UTF-8') > 25 || !preg_match('/^\p{L}+(?:-\p{L}+)*$/u', $hashtag))) {
             http_response_code(400);
             $this->jsonResponse(false, 'Hashtag invalide.');
+        }
+
+        $total = $this->photoModel->countPublicPhotos($hashtag);
+        // A bookmarked page can disappear after photos are deleted.
+        if ($offset >= $total) {
+            $offset = $total > 0 ? (int) (floor(($total - 1) / $limit) * $limit) : 0;
         }
 
         $photos = $hashtag === ''
@@ -154,6 +165,7 @@ class PhotoController {
             'is_logged_in' => isset($_SESSION['user_id']),
             'hashtag' => $hashtag === '' ? null : mb_strtolower($hashtag, 'UTF-8'),
             'search_mode' => $hashtag === '' ? null : 'partial',
+            'pagination' => ['total' => $total, 'limit' => $limit, 'offset' => $offset],
             'photos' => array_map([$this, 'serializePhoto'], $photos)
         ]);
     }
@@ -164,7 +176,7 @@ class PhotoController {
             $this->jsonResponse(false, 'Methode non autorisee.');
         }
 
-        $limit = (int) ($_GET['limit'] ?? 20);
+        $limit = Validation::integer($_GET['limit'] ?? 20, 1, 50, 'Limite');
 
         $this->jsonResponse(true, null, [
             'hashtags' => array_map(function ($hashtag) {
@@ -188,7 +200,7 @@ class PhotoController {
         }
 
         $payload = $this->readPayload();
-        $photoId = (int) ($payload['photo_id'] ?? $payload['photoId'] ?? 0);
+        $photoId = Validation::integer($payload['photo_id'] ?? $payload['photoId'] ?? null, 1, 2147483647, 'Photo');
 
         if ($photoId <= 0 || !$this->photoModel->getById($photoId)) {
             http_response_code(404);
@@ -202,7 +214,9 @@ class PhotoController {
             $this->photoModel->unlike($photoId, $userId);
             $liked = false;
         } else {
-            $this->photoModel->like($photoId, $userId);
+            if ($this->photoModel->like($photoId, $userId)) {
+                $this->notifications->send($photoId, $userId);
+            }
             $liked = true;
         }
 
@@ -219,7 +233,7 @@ class PhotoController {
             $this->jsonResponse(false, 'Methode non autorisee.');
         }
 
-        $photoId = (int) ($_GET['photo_id'] ?? $_GET['photoId'] ?? 0);
+        $photoId = Validation::integer($_GET['photo_id'] ?? $_GET['photoId'] ?? null, 1, 2147483647, 'Photo');
 
         if ($photoId <= 0 || !$this->photoModel->getById($photoId)) {
             http_response_code(404);
@@ -245,8 +259,8 @@ class PhotoController {
         }
 
         $payload = $this->readPayload();
-        $photoId = (int) ($payload['photo_id'] ?? $payload['photoId'] ?? 0);
-        $comment = trim((string) ($payload['comment'] ?? ''));
+        $photoId = Validation::integer($payload['photo_id'] ?? $payload['photoId'] ?? null, 1, 2147483647, 'Photo');
+        $comment = trim(Validation::text($payload['comment'] ?? '', 500, 'Commentaire', true));
 
         if ($photoId <= 0 || !$this->photoModel->getById($photoId)) {
             http_response_code(404);
@@ -268,6 +282,8 @@ class PhotoController {
             $this->jsonResponse(false, 'Impossible d ajouter le commentaire.');
         }
 
+        $this->notifications->send($photoId, (int) $_SESSION['user_id'], $comment);
+
         $this->jsonResponse(true, null, [
             'photo_id' => $photoId,
             'comments_count' => $this->photoModel->countComments($photoId),
@@ -280,9 +296,10 @@ class PhotoController {
 
         if (stripos($contentType, 'application/json') !== false) {
             $raw = file_get_contents('php://input');
+            $decoded = json_decode($raw);
             $payload = json_decode($raw, true);
 
-            if (!is_array($payload)) {
+            if (!$decoded instanceof stdClass || json_last_error() !== JSON_ERROR_NONE) {
                 throw new InvalidArgumentException('JSON invalide.');
             }
 
@@ -293,7 +310,7 @@ class PhotoController {
     }
 
     private function readStructuredField($payload, $key, $default) {
-        if (!isset($payload[$key])) {
+        if (!array_key_exists($key, $payload)) {
             return $default;
         }
 
@@ -310,17 +327,18 @@ class PhotoController {
 
     private function validateRequestedHashtags($hashtags) {
         if (is_string($hashtags)) {
+            Validation::text($hashtags, 129, 'Hashtags', true);
             $hashtags = preg_split('/[\s,]+/', $hashtags);
         }
 
-        if (!is_array($hashtags)) {
-            return [];
+        if (!is_array($hashtags) || !array_is_list($hashtags) || count($hashtags) > 5) {
+            throw new InvalidArgumentException('Liste de 5 mots-clés maximum attendue.');
         }
 
         $clean = [];
 
         foreach ($hashtags as $hashtag) {
-            $hashtag = trim((string) $hashtag);
+            $hashtag = trim(Validation::text($hashtag, 25, 'Hashtag', true));
 
             if ($hashtag === '') {
                 continue;
@@ -347,7 +365,10 @@ class PhotoController {
     }
 
     private function buildRenderLayers($requestedLayers, $frameId, $requestedStickers) {
-        if (is_array($requestedLayers)) {
+        if ($requestedLayers !== null) {
+            if (!is_array($requestedLayers) || !array_is_list($requestedLayers) || count($requestedLayers) > 11) {
+                throw new InvalidArgumentException('Liste de 11 calques maximum attendue.');
+            }
             return $this->normalizeRequestedLayers($requestedLayers);
         }
 
@@ -389,6 +410,7 @@ class PhotoController {
 
                 $frameId = $requestedLayer['frame_id'] ?? $requestedLayer['id'] ?? null;
 
+                Validation::identifier($frameId, 'Cadre');
                 if (!$frameId) {
                     throw new InvalidArgumentException('Cadre invalide.');
                 }
@@ -425,7 +447,7 @@ class PhotoController {
     }
 
     private function buildStickerRenderData($requestedStickers) {
-        if (empty($requestedStickers)) {
+        if ($requestedStickers === []) {
             return [];
         }
 
@@ -441,7 +463,7 @@ class PhotoController {
             $requestedStickers = [$requestedStickers];
         }
 
-        if (count($requestedStickers) > 10) {
+        if (!array_is_list($requestedStickers) || count($requestedStickers) > 10) {
             throw new InvalidArgumentException('Dix stickers maximum sont autorises.');
         }
 
@@ -457,6 +479,15 @@ class PhotoController {
             }
 
             $stickerId = $requestedSticker['sticker_id'] ?? $requestedSticker['id'] ?? null;
+            foreach (['center_x_percent' => [-100, 200], 'x_percent' => [-100, 200],
+                'center_y_percent' => [-100, 200], 'y_percent' => [-100, 200],
+                'width_percent' => [0.001, 300], 'height_percent' => [0.001, 300],
+                'rotation_degrees' => [-360, 360], 'rotation' => [-360, 360]] as $key => $range) {
+                if (array_key_exists($key, $requestedSticker)) {
+                    Validation::number($requestedSticker[$key], $range[0], $range[1], $key);
+                }
+            }
+            Validation::identifier($stickerId, 'Sticker');
             $sticker = $this->photoModel->getActiveSticker($stickerId);
 
             if (!$sticker) {
@@ -466,11 +497,11 @@ class PhotoController {
             $stickers[] = [
                 'sticker_id' => $sticker['sticker_id'],
                 'path' => $sticker['path'],
-                'center_x_percent' => $requestedSticker['center_x_percent'] ?? $requestedSticker['x_percent'] ?? 50,
-                'center_y_percent' => $requestedSticker['center_y_percent'] ?? $requestedSticker['y_percent'] ?? 50,
-                'width_percent' => $requestedSticker['width_percent'] ?? 25,
-                'height_percent' => $requestedSticker['height_percent'] ?? null,
-                'rotation_degrees' => $requestedSticker['rotation_degrees'] ?? $requestedSticker['rotation'] ?? 0
+                'center_x_percent' => Validation::number($requestedSticker['center_x_percent'] ?? $requestedSticker['x_percent'] ?? 50, -100, 200, 'center_x_percent'),
+                'center_y_percent' => Validation::number($requestedSticker['center_y_percent'] ?? $requestedSticker['y_percent'] ?? 50, -100, 200, 'center_y_percent'),
+                'width_percent' => Validation::number($requestedSticker['width_percent'] ?? 25, 0.001, 300, 'width_percent'),
+                'height_percent' => isset($requestedSticker['height_percent']) ? Validation::number($requestedSticker['height_percent'], 0.001, 300, 'height_percent') : null,
+                'rotation_degrees' => Validation::number($requestedSticker['rotation_degrees'] ?? $requestedSticker['rotation'] ?? 0, -360, 360, 'rotation_degrees')
             ];
         }
 

@@ -19,14 +19,14 @@ function loadPageScript(page) {
         register: 'register',
         studio: 'studio'
     };
-    const scriptName = pageScripts[page];
+    const scriptName = Object.prototype.hasOwnProperty.call(pageScripts, page) ? pageScripts[page] : null;
     if (!scriptName) {
         return;
     }
 
     console.info('[ROUTER] loading page script', { page, scriptName });
 
-    import(`/js/pages/${scriptName}.js`)
+    import(`/js/pages/${scriptName}.js?v=${encodeURIComponent(window.userConfig.scriptVersion)}`)
         .then(module => {
             if (module.init) {
                 console.info('[ROUTER] init page script', { page, scriptName });
@@ -52,11 +52,19 @@ export function loadPage(page, queryParams = new URLSearchParams()) {
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
     })
     .then(response => {
-        if (response.status === 403) return loadPage('login'); // Sécurité
+        if (response.status === 403) {
+            window.location.href = '/?page=login';
+            return null;
+        }
         if (!response.ok) throw new Error("Erreur serveur");
+        // Only server-rendered HTML views may reach the HTML sink below.
+        // JSON can contain raw user comments and must never be parsed as HTML.
+        const contentType = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+        if (contentType !== 'text/html') throw new Error('Réponse HTML attendue');
         return response.text();
     })
     .then(html => {
+        if (html === null) return;
         // Nettoyage Webcam si on change de page
         if (window.currentStream) {
             window.currentStream.getTracks().forEach(track => track.stop());
@@ -100,21 +108,6 @@ export function router(shouldFetch = true) {
 }
 
 export function updateNavigation() {
-    const nav = document.querySelector('nav');
-
-    if (window.userConfig.isLoggedIn) {
-        // Menu pour connectés
-        nav.innerHTML = `
-            <a data-page="home">Accueil</a>
-            <a data-page="studio">Studio</a>
-            <a href="/logout">Déconnexion (${window.userConfig.username})</a>
-        `;
-    } else {
-        // Menu pour visiteurs
-        nav.innerHTML = `
-            <a data-page="home">Accueil</a>
-            <a data-page="gallery">Galerie</a>
-            <a data-page="login">Connexion</a>
-        `;
-    }
+    // Le header et ses formulaires sécurisés sont rendus par le serveur.
+    window.location.reload();
 }

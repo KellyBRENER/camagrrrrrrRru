@@ -1,16 +1,17 @@
 <?php
 //le user doit renseigner email valide, username, mdp robuste
 // + envoie lien de confirmation unique par email
-$registerError = $_GET['error'] ?? '';
+$registerError = is_string($_GET['error'] ?? null) ? $_GET['error'] : '';
 ?>
 <div class="auth-container">
     <div class="form-savane">
         <h2 class="text-center mb-4"><span class="paw-print">🦁</span> Rejoindre la meute</h2>
         
         <form id="registerForm" class="needs-validation" action="/?page=register" method="POST" novalidate>
+            <?php echo Security::csrfField(); ?>
             <div class="mb-3">
                 <label for="username" class="form-label">Pseudo</label>
-                <input type="text" class="form-control" id="username" name="username" placeholder="Votre pseudo félin" required>
+                <input type="text" class="form-control" id="username" name="username" maxlength="50" placeholder="Votre pseudo félin" required>
                 <div class="invalid-feedback">
                     Veuillez choisir un nom d'utilisateur.
                 </div>
@@ -18,7 +19,7 @@ $registerError = $_GET['error'] ?? '';
 
             <div class="mb-3">
                 <label for="email" class="form-label">Email</label>
-                <input type="email" class="form-control" id="email" name="email" placeholder="votre@email.com" required>
+                <input type="email" class="form-control" id="email" name="email" maxlength="100" placeholder="votre@email.com" required>
                 <div class="invalid-feedback">
                     Veuillez entrer un email valide (ex: nom@domaine.com).
                 </div>
@@ -36,7 +37,7 @@ $registerError = $_GET['error'] ?? '';
         </form>
         
         <p id="registerMsg" class="alert-savane error mt-3" role="alert" style="display: <?php echo $registerError ? 'block' : 'none'; ?>;">
-            <?php echo htmlspecialchars($registerError); ?>
+            <?php echo htmlspecialchars($registerError, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
         </p>
         
         <div class="text-center mt-4">
