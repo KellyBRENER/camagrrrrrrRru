@@ -11,13 +11,14 @@ class UserModel {
         return $this->lastError;
     }
 
-    public function createPasswordReset($userId, $tokenHash) {
+    public function createPasswordReset($userId, $tokenHash, $expectedEmail = null) {
         $this->db->beginTransaction();
         try {
             // Verrou par utilisateur : deux demandes simultanées ne peuvent pas envoyer deux liens.
-            $lock = $this->db->prepare('SELECT id FROM users WHERE id = ? AND is_verified = 1 FOR UPDATE');
+            $lock = $this->db->prepare('SELECT email FROM users WHERE id = ? AND is_verified = 1 FOR UPDATE');
             $lock->execute([$userId]);
-            if (!$lock->fetchColumn()) {
+            $email = $lock->fetchColumn();
+            if ($email === false || ($expectedEmail !== null && $email !== $expectedEmail)) {
                 $this->db->rollBack();
                 return false;
             }
@@ -52,8 +53,19 @@ class UserModel {
 
     public function resetPassword($tokenHash, $password) {
         $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+        // Discover the owner without locking; always lock users before password_resets.
+        $owner = $this->db->prepare('SELECT user_id FROM password_resets WHERE token_hash = ?');
+        $owner->execute([$tokenHash]);
+        $ownerId = $owner->fetchColumn();
+        if (!$ownerId) return false;
         $this->db->beginTransaction();
         try {
+            $lock = $this->db->prepare('SELECT id FROM users WHERE id = ? AND is_verified = 1 FOR UPDATE');
+            $lock->execute([$ownerId]);
+            if (!$lock->fetchColumn()) {
+                $this->db->rollBack();
+                return false;
+            }
             $stmt = $this->db->prepare('SELECT user_id FROM password_resets WHERE token_hash = ? AND expires_at > NOW() FOR UPDATE');
             $stmt->execute([$tokenHash]);
             $userId = $stmt->fetchColumn();
@@ -83,11 +95,11 @@ class UserModel {
         return $stmt->execute([$enabled ? 1 : 0, $userId]);
     }
 
-    public function updateAccount($userId, $currentPassword, $username = null, $email = null, $newPassword = null) {
+    public function updateAccount($userId, $currentPassword, $username = null, $email = null, $newPassword = null, $original = null) {
         $this->lastError = null;
         $this->db->beginTransaction();
         try {
-            $stmt = $this->db->prepare('SELECT password, email FROM users WHERE id = ? AND is_verified = 1 FOR UPDATE');
+            $stmt = $this->db->prepare('SELECT password, username, email FROM users WHERE id = ? AND is_verified = 1 FOR UPDATE');
             $stmt->execute([$userId]);
             $account = $stmt->fetch();
             if (!$account || !password_verify($currentPassword, $account['password'])) {
@@ -101,18 +113,33 @@ class UserModel {
                 $update = $this->db->prepare('UPDATE users SET password = ? WHERE id = ?');
                 $update->execute([$hash, $userId]);
             } else {
-                $update = $this->db->prepare('UPDATE users SET username = ?, email = ? WHERE id = ?');
-                $update->execute([$username, $email, $userId]);
+                $changes = [];
+                $values = [];
+                foreach (['username' => $username, 'email' => $email] as $field => $value) {
+                    if ($original !== null && $value === $original[$field]) continue;
+                    if ($original !== null && $account[$field] !== $original[$field] && $account[$field] !== $value) {
+                        $this->db->rollBack();
+                        $this->lastError = 'profile_conflict';
+                        return false;
+                    }
+                    $changes[] = "$field = ?";
+                    $values[] = $value;
+                }
+                if ($changes) {
+                    $values[] = $userId;
+                    $update = $this->db->prepare('UPDATE users SET ' . implode(', ', $changes) . ' WHERE id = ?');
+                    $update->execute($values);
+                }
             }
-            if ($newPassword !== null || $email !== $account['email']) {
+            if ($newPassword !== null || ($email !== $account['email'] && ($original === null || $email !== $original['email']))) {
                 // Old reset links must not survive a password or recovery address change.
                 $delete = $this->db->prepare('DELETE FROM password_resets WHERE user_id = ?');
                 $delete->execute([$userId]);
             }
             $this->db->commit();
             return $hash;
-        } catch (PDOException $e) {
-            $this->db->rollBack();
+        } catch (Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
             $this->lastError = ($e->errorInfo[1] ?? null) === 1062 ? 'duplicate_user' : 'database_error';
             return false;
         }
@@ -168,7 +195,6 @@ class UserModel {
                 $this->lastError = 'database_error';
             }
 
-            error_log("Erreur lors de la création de l'utilisateur : " . $e->getMessage());
             return false;
         }
     }

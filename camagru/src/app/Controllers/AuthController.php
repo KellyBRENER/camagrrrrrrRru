@@ -23,14 +23,6 @@ class AuthController {
         exit;
     }
 
-    private function flowLog($step, $context = []) {
-        $line = '[REGISTER_FLOW] ' . $step;
-        if (!empty($context)) {
-            $line .= ' | ' . json_encode($context, JSON_UNESCAPED_SLASHES);
-        }
-        error_log($line);
-    }
-
     private function buildVerificationLink($token) {
         return Security::appUrl() . '/?page=verify&token=' . urlencode($token);
     }
@@ -73,7 +65,7 @@ class AuthController {
             $headerString .= "$key: $value\r\n";
         }
 
-        return mail($email, $subject, $body, $headerString);
+        return @mail($email, $subject, $body, $headerString);
     }
     //POST username + mot de passe pour se connecter
     //GET pour afficher le formulaire de connexion
@@ -119,13 +111,6 @@ class AuthController {
         // 1. Si on reçoit des données (POST)
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $isAjax = $this->isAjaxRequest();
-            $requestId = bin2hex(random_bytes(6));
-            $this->flowLog('register_post_received', [
-                'requestId' => $requestId,
-                'isAjax' => $isAjax,
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
-            ]);
-
             $username = is_string($_POST['username'] ?? null) ? trim($_POST['username']) : '';
             $email = is_string($_POST['email'] ?? null) ? trim($_POST['email']) : '';
             $password = is_string($_POST['password'] ?? null) ? $_POST['password'] : '';
@@ -135,17 +120,9 @@ class AuthController {
                 header('Location: /?page=register&error=' . urlencode($message));
                 exit;
             }
-            $this->flowLog('register_payload_parsed', [
-                'requestId' => $requestId,
-                'username' => $username,
-                'email' => $email,
-                'passwordLength' => strlen($password)
-            ]);
-
             // Validation simple (tu pourras ajouter des regex plus tard)
             if ($username === '' || $email === '' || $password === '') {
                 $message = 'Veuillez remplir tous les champs.';
-                $this->flowLog('register_validation_failed', ['requestId' => $requestId, 'reason' => 'empty_fields']);
                 if ($isAjax) {
                     $this->jsonResponse(false, $message);
                 }
@@ -154,7 +131,6 @@ class AuthController {
             }
             if (!Security::validPassword($password)) {
 				$message = 'Le mot de passe doit contenir 8 caractères, un chiffre et une lettre.';
-                $this->flowLog('register_validation_failed', ['requestId' => $requestId, 'reason' => 'weak_password']);
                 if ($isAjax) {
                     $this->jsonResponse(false, $message);
                 }
@@ -163,7 +139,6 @@ class AuthController {
             }
             if (!Security::validEmail($email)) {
 				$message = 'Le format de l\'adresse email est invalide.';
-                $this->flowLog('register_validation_failed', ['requestId' => $requestId, 'reason' => 'invalid_email']);
                 if ($isAjax) {
                     $this->jsonResponse(false, $message);
                 }
@@ -171,19 +146,14 @@ class AuthController {
                 exit;
             }
 			$token = bin2hex(random_bytes(32));
-            $this->flowLog('register_token_generated', ['requestId' => $requestId]);
 
             // Tentative de création
             $success = $this->userModel->create($username, $email, $password, $token);
 
             if ($success) {
-                $this->flowLog('register_user_created', ['requestId' => $requestId, 'email' => $email]);
-                $this->flowLog('register_verify_link_built', ['requestId' => $requestId, 'host' => $_SERVER['HTTP_HOST'] ?? 'localhost']);
-
     			$mailSent = $this->sendVerificationEmail($email, $username, $token);
 
     			if ($mailSent) {
-                    $this->flowLog('register_mail_sent', ['requestId' => $requestId, 'to' => $email]);
                     if ($isAjax) {
                         $this->jsonResponse(true);
                     }
@@ -191,7 +161,6 @@ class AuthController {
                     exit;
     			} else {
                     $message = "Erreur lors de l'envoi du mail.";
-                    $this->flowLog('register_mail_failed', ['requestId' => $requestId, 'to' => $email]);
                     if ($isAjax) {
                         $this->jsonResponse(false, $message);
                     }
@@ -205,7 +174,6 @@ class AuthController {
                     } else {
                         $message = 'Erreur de base de données. Vérifiez que la base est initialisée.';
                     }
-	                	$this->flowLog('register_create_failed', ['requestId' => $requestId, 'reason' => $createError ?? 'unknown']);
                 	if ($isAjax) {
                 		$this->jsonResponse(false, $message);
                 	}
@@ -263,7 +231,6 @@ class AuthController {
         $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
         $input = $isPost ? $_POST : $_GET;
         $token = is_string($input['token'] ?? null) ? $input['token'] : '';
-        $this->flowLog('verify_received', ['hasToken' => $token !== '', 'isPost' => $isPost]);
 
         if (!preg_match('/^[a-f0-9]{64}$/D', $token)) {
             return 'verify_failed.php';
@@ -278,11 +245,9 @@ class AuthController {
 
         // Le POST est déjà protégé par le contrôle CSRF central dans index.php.
         if ($this->userModel->confirmAccount($token)) {
-            $this->flowLog('verify_success');
             return 'verify_success.php';
         }
 
-        $this->flowLog('verify_failed');
         return 'verify_failed.php';
     }
 
@@ -295,17 +260,16 @@ class AuthController {
                 if ($user && $user['is_verified']) {
                     $token = bin2hex(random_bytes(32));
                     $tokenHash = hash('sha256', $token);
-                    if ($this->userModel->createPasswordReset($user['id'], $tokenHash)) {
+                    if ($this->userModel->createPasswordReset($user['id'], $tokenHash, $user['email'])) {
                         $link = Security::appUrl() . '/?page=reset_password&token=' . urlencode($token);
                         $safeLink = htmlspecialchars($link, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
                         $body = '<p>Pour choisir un nouveau mot de passe Camagru, cliquez sur le lien ci-dessous.</p>'
                             . '<p><a href="' . $safeLink . '">Réinitialiser mon mot de passe</a></p>'
                             . '<p>Ce lien est valable 30 minutes et ne peut être utilisé qu’une fois.</p>'
                             . '<p>Si vous n’avez pas demandé ce changement, ignorez cet email.</p>';
-                        if (!mail($user['email'], 'Réinitialisation de votre mot de passe Camagru', $body,
+                        if (!@mail($user['email'], 'Réinitialisation de votre mot de passe Camagru', $body,
                             "From: Camagru <no-reply@camagru.com>\r\nContent-Type: text/html; charset=UTF-8\r\n")) {
                             $this->userModel->revokePasswordReset($tokenHash);
-                            error_log('Impossible d envoyer le mail de réinitialisation.');
                         }
                     }
                 }
@@ -376,9 +340,10 @@ class AuthController {
         if ($hash === false) {
             $error = $this->userModel->getLastError();
             $messages = ['invalid_password' => 'Mot de passe actuel incorrect.',
+                'profile_conflict' => 'Ces informations ont été modifiées ailleurs. Rechargez le profil avant de réessayer.',
                 'duplicate_user' => 'Ce pseudo ou cette adresse email est déjà utilisé.',
                 'database_error' => 'Impossible d’enregistrer les modifications. Réessayez.'];
-            $this->profileResponse(false, $messages[$error] ?? $messages['database_error'], $error === 'database_error' ? 500 : 400);
+            $this->profileResponse(false, $messages[$error] ?? $messages['database_error'], $error === 'database_error' ? 500 : ($error === 'profile_conflict' ? 409 : 400));
         }
         $profile = $this->userModel->getById($_SESSION['user_id']);
         $_SESSION['username'] = $profile['username'];
@@ -423,7 +388,11 @@ class AuthController {
         if (!Security::validText($currentPassword, 72) || strlen($currentPassword) > 72 || $currentPassword === '') {
             $this->profileResponse(false, 'Saisissez votre mot de passe actuel.');
         }
-        $hash = $this->userModel->updateAccount($_SESSION['user_id'], $currentPassword, $username, $email);
+        $original = ['username' => $_POST['original_username'] ?? null, 'email' => $_POST['original_email'] ?? null];
+        if (!Security::validText($original['username'], 50) || !Security::validEmail($original['email'])) {
+            $this->profileResponse(false, 'Rechargez le profil avant de réessayer.', 409);
+        }
+        $hash = $this->userModel->updateAccount($_SESSION['user_id'], $currentPassword, $username, $email, null, $original);
         $this->finishAccountUpdate($hash, 'Vos informations ont été mises à jour.');
     }
 

@@ -1,5 +1,5 @@
 <?php
-//possibilité de se déconnecté à tout instant
+//possibilité de se déconnecter à tout instant
 //affiche le logo du site et le bouton déconnexion si le user est connecté
 ?>
 <header class="navbar leopard-bar px-4 py-2">

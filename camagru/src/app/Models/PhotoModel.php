@@ -6,46 +6,29 @@ class PhotoModel {
         $this->db = $pdo;
     }
 
-    public function create($userId, $hashtags = [], $stickerIds = []) {
-        $this->db->beginTransaction();
-
-        try {
-            $sql = "
-                INSERT INTO photos (user_id, path)
-                VALUES (:user_id, '')
-            ";
-            $stmt = $this->db->prepare($sql);
-            $stmt->execute([':user_id' => $userId]);
-
-            $photoId = (int) $this->db->lastInsertId();
-            $path = $this->buildRelativePhotoPath($userId, $photoId);
-            $this->updatePath($photoId, $path);
-            $this->syncHashtags($photoId, $this->buildCreateHashtags($hashtags, $stickerIds));
-
-            $this->db->commit();
-            return [
-                'photo_id' => $photoId,
-                'path' => $path
-            ];
-        } catch (PDOException $e) {
-            $this->db->rollBack();
-            error_log("Erreur lors de la creation de la photo : " . $e->getMessage());
-            return false;
+    public function create($userId, $hashtags = [], $stickerIds = [], $path = null) {
+        $path = $path ?? $this->buildRelativePhotoPath($userId);
+        for ($attempt = 0; ; $attempt++) {
+            $this->db->beginTransaction();
+            try {
+                $stmt = $this->db->prepare('INSERT INTO photos (user_id, path) VALUES (?, ?)');
+                $stmt->execute([$userId, $path]);
+                $photoId = (int) $this->db->lastInsertId();
+                $this->syncHashtags($photoId, $this->buildCreateHashtags($hashtags, $stickerIds));
+                $this->db->commit();
+                return ['photo_id' => $photoId, 'path' => $path];
+            } catch (Throwable $e) {
+                if ($this->db->inTransaction()) $this->db->rollBack();
+                // Unicode aliases can still lock common hashtags in a different order.
+                // Retry only a transaction explicitly aborted by InnoDB, never an uncertain commit.
+                if ($e instanceof PDOException && ($e->errorInfo[1] ?? null) === 1213 && $attempt < 2) continue;
+                throw $e;
+            }
         }
     }
 
-    public function buildRelativePhotoPath($userId, $photoId) {
-        return sprintf('uploads/photos/%d/%d.png', (int) $userId, (int) $photoId);
-    }
-
-    public function updatePath($photoId, $path) {
-        $sql = "UPDATE photos SET path = :path WHERE photo_id = :photo_id";
-        $stmt = $this->db->prepare($sql);
-
-        return $stmt->execute([
-            ':photo_id' => $photoId,
-            ':path' => $path
-        ]);
+    public function buildRelativePhotoPath($userId) {
+        return sprintf('uploads/photos/%d/%s.png', (int) $userId, bin2hex(random_bytes(16)));
     }
 
     public function getById($photoId) {
@@ -153,6 +136,32 @@ class PhotoModel {
         return $stmt->fetchAll();
     }
 
+    public function getPublicPhotoBatch($limit, $beforeCreatedAt = null, $beforeId = null, $hashtag = '', $viewerId = null) {
+        $limit = max(1, min(51, (int) $limit));
+        $conditions = [];
+        $params = [':viewer_id' => $viewerId];
+        if ($beforeCreatedAt !== null && $beforeId !== null) {
+            $conditions[] = '(p.created_at < :before_created_at
+                OR (p.created_at = :before_created_at AND p.photo_id < :before_id))';
+            $params[':before_created_at'] = $beforeCreatedAt;
+            $params[':before_id'] = $beforeId;
+        }
+        if ($hashtag !== '') {
+            $conditions[] = 'EXISTS (SELECT 1 FROM photo_hashtags ph JOIN hashtags h ON h.hashtag_id = ph.hashtag_id
+                WHERE ph.photo_id = p.photo_id AND h.hashtag LIKE :hashtag)';
+            $params[':hashtag'] = '%' . $this->normalizeHashtag($hashtag) . '%';
+        }
+        $where = $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
+        $stmt = $this->db->prepare("SELECT p.photo_id, p.user_id, p.path, p.created_at, u.username,
+            (SELECT COUNT(*) FROM photo_likes l WHERE l.photo_id = p.photo_id) AS likes_count,
+            (SELECT COUNT(*) FROM comments c WHERE c.photo_id = p.photo_id) AS comments_count,
+            EXISTS (SELECT 1 FROM photo_likes l WHERE l.photo_id = p.photo_id AND l.user_id = :viewer_id) AS liked_by_user
+            FROM photos p JOIN users u ON u.id = p.user_id
+            $where ORDER BY p.created_at DESC, p.photo_id DESC LIMIT $limit");
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
     public function getByUser($userId) {
         $sql = "
             SELECT photo_id, user_id, path, created_at
@@ -166,15 +175,43 @@ class PhotoModel {
         return $stmt->fetchAll();
     }
 
-    public function deleteByOwner($photoId, $userId) {
-        $sql = "DELETE FROM photos WHERE photo_id = :photo_id AND user_id = :user_id";
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute([
-            ':photo_id' => $photoId,
-            ':user_id' => $userId
-        ]);
+    public function deleteByOwner($photoId, $userId, $deleteFile = null) {
+        $this->db->beginTransaction();
+        try {
+            // MariaDB returns only the row actually deleted by this owner.
+            $stmt = $this->db->prepare('DELETE FROM photos WHERE photo_id = ? AND user_id = ? RETURNING path');
+            $stmt->execute([$photoId, $userId]);
+            $photo = $stmt->fetch();
+            $stmt->closeCursor();
+            if ($photo && $deleteFile !== null) $deleteFile($photo['path']);
+            $this->db->commit();
+            return (bool) $photo;
+        } catch (Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $e;
+        }
+    }
 
-        return $stmt->rowCount() > 0;
+    public function toggleLike($photoId, $userId) {
+        $this->db->beginTransaction();
+        try {
+            // Serialize toggles and deletion of this photo, never gallery reads.
+            $lock = $this->db->prepare('SELECT photo_id FROM photos WHERE photo_id = ? FOR UPDATE');
+            $lock->execute([$photoId]);
+            if (!$lock->fetchColumn()) {
+                $this->db->rollBack();
+                return null;
+            }
+            $liked = !$this->isLikedByUser($photoId, $userId);
+            if ($liked) $this->like($photoId, $userId);
+            else $this->unlike($photoId, $userId);
+            $count = $this->countLikes($photoId);
+            $this->db->commit();
+            return ['liked_by_user' => $liked, 'likes_count' => $count];
+        } catch (Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $e;
+        }
     }
 
     public function like($photoId, $userId) {
@@ -238,12 +275,12 @@ class PhotoModel {
         ";
         $stmt = $this->db->prepare($sql);
 
-        if (!$stmt->execute([
-            ':photo_id' => $photoId,
-            ':user_id' => $userId,
-            ':comment' => $comment
-        ])) {
-            return false;
+        try {
+            $stmt->execute([':photo_id' => $photoId, ':user_id' => $userId, ':comment' => $comment]);
+        } catch (PDOException $e) {
+            // A concurrent deletion wins: the FK prevents an orphan comment.
+            if (($e->errorInfo[1] ?? null) === 1452) return false;
+            throw $e;
         }
 
         return (int) $this->db->lastInsertId();
@@ -347,6 +384,7 @@ class PhotoModel {
 
     public function syncHashtags($photoId, $hashtags) {
         $normalized = $this->normalizeHashtags($hashtags);
+        sort($normalized, SORT_STRING);
 
         $deleteSql = "DELETE FROM photo_hashtags WHERE photo_id = :photo_id";
         $deleteStmt = $this->db->prepare($deleteSql);
@@ -420,22 +458,9 @@ class PhotoModel {
     }
 
     private function findOrCreateHashtag($hashtag) {
-        $selectSql = "SELECT hashtag_id FROM hashtags WHERE hashtag = :hashtag LIMIT 1";
-        $selectStmt = $this->db->prepare($selectSql);
-        $selectStmt->execute([':hashtag' => $hashtag]);
-        $existingId = $selectStmt->fetchColumn();
-
-        if ($existingId) {
-            return (int) $existingId;
-        }
-
-        $insertSql = "INSERT INTO hashtags (hashtag) VALUES (:hashtag)";
-        $insertStmt = $this->db->prepare($insertSql);
-
-        if (!$insertStmt->execute([':hashtag' => $hashtag])) {
-            return false;
-        }
-
+        $stmt = $this->db->prepare('INSERT INTO hashtags (hashtag) VALUES (?)
+            ON DUPLICATE KEY UPDATE hashtag_id = LAST_INSERT_ID(hashtag_id)');
+        $stmt->execute([$hashtag]);
         return (int) $this->db->lastInsertId();
     }
 

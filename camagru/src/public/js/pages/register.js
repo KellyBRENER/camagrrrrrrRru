@@ -10,16 +10,12 @@ export function init() {
     
     if (!form) return;
 
-    console.info('[REGISTER_FLOW][FRONT] register page init');
-
     form.addEventListener('submit', (event) => {
-        console.info('[REGISTER_FLOW][FRONT] submit clicked');
         // 1. On active le visuel Bootstrap (bordures rouges/vertes)
         form.classList.add('was-validated');
 
         // 2. Vérification de la validité HTML5 (champs requis, format email)
         if (!form.checkValidity()) {
-            console.warn('[REGISTER_FLOW][FRONT] html validation failed');
             event.preventDefault();
             event.stopPropagation();
             return; // On arrête tout ici si le formulaire est invalide
@@ -33,7 +29,6 @@ export function init() {
         const regex = /^(?=.*[A-Za-z])(?=.*\d)[\s\S]{8,}$/;
         
         if (!regex.test(password) || new TextEncoder().encode(password).length > 72) {
-            console.warn('[REGISTER_FLOW][FRONT] password validation failed');
             showMessage("Le mot de passe doit contenir au moins 8 caractères, dont une lettre et un chiffre.");
             return; // On arrête tout ici si le mot de passe est trop faible
         }
@@ -47,7 +42,6 @@ export function init() {
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
         .then(async (res) => {
-            console.info('[REGISTER_FLOW][FRONT] response received', { status: res.status });
             const raw = await res.text();
             try {
                 return JSON.parse(raw);
@@ -57,15 +51,12 @@ export function init() {
         })
         .then(data => {
             if (data.success) {
-                console.info('[REGISTER_FLOW][FRONT] register success, redirecting');
                 window.location.href = "/?page=registerinprogress";
             } else {
-                console.warn('[REGISTER_FLOW][FRONT] register rejected', data);
                 showMessage(data.message || "Impossible de créer le compte.");
             }
         })
         .catch(err => {
-            console.error('[REGISTER_FLOW][FRONT] fetch error', err);
             showMessage("Une erreur serveur est survenue.");
         });
     });

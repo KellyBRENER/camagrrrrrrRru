@@ -36,7 +36,6 @@ export function init() {
             try {
                 return JSON.parse(raw);
             } catch (err) {
-                console.error('[LOGIN] Réponse serveur invalide', raw);
                 throw new Error('Réponse serveur invalide');
             }
         })
@@ -54,8 +53,6 @@ export function init() {
             }
         })
         .catch(err => {
-            console.error('[LOGIN] Erreur de connexion', err);
-
             if (errorMessage) {
                 errorMessage.innerText = 'Une erreur est survenue pendant la connexion.';
                 errorMessage.style.display = 'block';

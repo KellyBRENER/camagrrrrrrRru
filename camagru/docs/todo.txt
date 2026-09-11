@@ -1,174 +1,201 @@
 CAMAGRU — SUIVI DES TÂCHES
-Mis à jour le 2026-09-08 après comparaison du sujet camagru.pdf v4.1,
-de document.md et du code. Audit statique : validation navigateur à compléter.
+Mis à jour le 2026-09-09 après l'audit du sujet camagru.pdf v4.1.
+Références : document.md et audit-concurrence.md, dans ce même dossier.
+Les dernières corrections et la recette sont prévues cet après-midi.
+
+ÉTAT ACTUEL
+Les fonctionnalités principales sont implémentées, mais le projet n'est pas
+encore entièrement conforme. Dernière suite serveur : 322 vérifications réussies.
+Tests DOM Chrome XSS et défilement infini : PASS. Galerie réelle inspectée sur
+Chrome mobile (390×844) et Firefox bureau (1280×900).
+Cela ne valide pas encore la webcam physique, la réception SMTP, tous les écrans
+mobiles, les navigateurs minimaux du sujet ni un premier déploiement vierge.
 
 RÈGLE DE SUIVI
-À chaque tâche terminée, mettre immédiatement ce fichier à jour : cocher [x],
-indiquer la date et la vérification réalisée. Ne pas cocher une tâche sur la seule
-base de sa présence dans le code. Conserver les tâches restantes et les limites.
-[ ] À faire / à vérifier ; [x] Terminé et vérifié.
+[ ] À faire / à vérifier ; [x] Terminé et vérifié pour le périmètre indiqué.
+À chaque tâche terminée, cocher, dater et noter la vérification réalisée.
+Ne pas cocher une recette sur la seule présence du code. Une implémentation déjà
+présente mais non testée en conditions réelles est signalée comme telle.
 
-MANDATORY — ORDRE DE PRIORITÉ
+CET APRÈS-MIDI — PRIORITÉS AVANT RENDU
 
-Sécurité
-[x] Corriger l'insertion non encodée du pseudo dans le JavaScript de Views/layout.php.
-    Vérifié le 2026-09-08 : correction déjà présente via json_encode et les options
-    JSON_HEX_TAG/AMP/APOS/QUOT ; test de régression avec un pseudo contenant
-    </script><script>alert(1)</script> réussi. Suite tests/security.php : 64/64 OK.
-[x] Ajouter une protection CSRF aux actions modifiant les données et aux formulaires
-    concernés ; vérifier le refus des requêtes sans preuve valide.
-    Terminé le 2026-09-08 : réalisation confirmée par l’utilisateur dans une autre
-    conversation ; présence du contrôle central, des jetons formulaires/AJAX et
-    des cas de test dans src/tests/security.php vérifiée ici, sans relancer les tests.
-[x] Sortir les identifiants DB de config/database.php, setup.php et dropdb.php :
-    utiliser les variables d'environnement issues d'un .env ignoré par Git.
-    Retirer les identifiants réels de la documentation et vérifier les fichiers suivis.
-    Vérifié le 2026-09-08 : les trois fichiers utilisent déjà databaseSettings(),
-    alimenté par les variables Docker Compose issues du .env ignoré par Git.
-    Connexion réelle et SELECT 1 réussis ; absence de MYSQL_ROOT_PASSWORD refusée.
-    Aucun .env suivi ni ancien mot de passe trouvé dans le code/documentation texte.
-    setup.php et dropdb.php inspectés sans exécution afin de préserver la base.
-[ ] Désactiver l'affichage des erreurs techniques au visiteur et remplacer les
-    messages PDO exposés par des messages applicatifs adaptés.
-[x] Compléter les validations serveur, notamment types et longueurs des champs.
-    Terminé le 2026-09-08 pour les routes actuellement implémentées : compte,
-    identifiants photos, pagination, commentaires UTF-8 (500 caractères), hashtags,
-    calques, coordonnées de recadrage/stickers, types JSON et images invalides.
-    Vérification : tests/security.php, 190 contrôles réussis dont les cas de
-    tests/validation_cases.php ; aucune erreur PHP sur les entrées invalides,
-    montages JSON/formulaire valides et absence de photos résiduelles vérifiés.
-    Validations également appliquées aux formulaires de profil le 2026-09-08.
-[ ] Vérifier les protections XSS, SQL, uploads invalides et accès non autorisés,
-    notamment la suppression d'une création appartenant à un autre utilisateur.
+1. Secrets et données suivies par Git
+[x] Retirer des fichiers suivis le dump
+    camagru/backups/camagru-before-db-volume-2026-09-07.sql.
+    Terminé localement le 2026-09-09 : supprimé de chaque commit réécrit et des
+    objets accessibles ; copie privée conservée au même chemin, ignorée par Git,
+    avec permissions 600. Les montages générés ont également été retirés de
+    l'historique et sont désormais ignorés, sauf le fichier .gitkeep.
+[x] Assainir les anciens identifiants DB littéraux repérés dans l'historique de
+    camagru/src/config/database.php et camagru/docker-compose.yml.
+    Terminé localement le 2026-09-09 : les 12 commits ont été réécrits, les
+    anciennes références/reflogs nettoyés et les objets concernés élagués.
+[x] Renouveler le secret MariaDB concerné et contrôler l'historique local.
+    Terminé le 2026-09-09 : nouveau secret aléatoire de 256 bits dans le .env
+    ignoré, compte MariaDB mis à jour, conteneurs recréés sans supprimer le volume
+    et connexion applicative vérifiée. Le secret SMTP actuel ne correspondait à
+    aucune valeur historique détectée. Analyse des 203 blobs accessibles : aucun
+    ancien littéral DB ni motif courant de clé privée/token détecté.
+[x] Publier l'historique assaini sur origin/main avec un force-push sécurisé.
+    Terminé le 2026-09-09 avec --force-with-lease sur l'ancien commit attendu ;
+    GitHub pointe maintenant sur d32db48. Les éventuels collaborateurs doivent
+    repartir de l'historique nettoyé au lieu de pousser leur ancienne branche.
 
-Compte utilisateur
-[x] Implémenter le mot de passe oublié : demande par email, lien unique avec
-    expiration et usage unique, formulaire et mise à jour du hash du mot de passe.
-    Terminé le 2026-09-08 : réalisation confirmée par l’utilisateur dans une autre
-    conversation ; routes, vues, modèle, migration password_resets et cas de test
-    dans src/tests/security.php vérifiés ici, sans relancer les tests ni envoyer de mail.
-[x] Brancher le profil : route privée, chargement des données, modification du
-    pseudo et de l'email, validations serveur et gestion des doublons.
-    Terminé le 2026-09-08 : profil prérempli, formulaires POST avec/sans AJAX,
-    mot de passe actuel requis, compte ciblé uniquement par la session, messages
-    d'erreur/succès, pseudo synchronisé dans les sessions. Liens de récupération
-    invalidés lors d'un changement d'email ; aucun email de revalidation ajouté.
-    Vérifié dans tests/profile_cases.php : accès privé, CSRF, doublons, XSS et sauvegarde.
-[x] Implémenter le changement de mot de passe depuis le profil.
-    Terminé le 2026-09-08 : ancien mot de passe vérifié, nouveau mot de passe validé
-    et confirmé, hash enregistré, liens de reset révoqués, session courante renouvelée
-    et autres sessions invalidées à leur prochaine requête.
-    Vérification : suite tests/security.php, 232 contrôles réussis au total,
-    dont 42 nouveaux cas profil ; syntaxes PHP/JS valides. Aucun mail externe envoyé.
+2. Consoles et erreurs techniques — exigence explicite du sujet
+[x] Retirer les traces de debug navigateur : routeur, inscription, studio,
+    connexion et galerie, notamment les console.info des parcours normaux.
+[x] Retirer la journalisation systématique d'inscription/activation côté serveur
+    (AuthController::flowLog) et traiter les autres sorties console applicatives.
+[x] Désactiver l'affichage public des erreurs PHP ; remplacer les messages PDO
+    exposés par des réponses applicatives propres, notamment dans database.php.
+[x] Rejouer les parcours normaux et les erreurs attendues en contrôlant les
+    consoles client/serveur : aucune erreur, warning ou trace applicative.
+    L'exception du sujet ne concerne que getUserMedia en l'absence de HTTPS.
+    Terminé le 2026-09-09 : aucun appel console/error_log applicatif restant,
+    affichage et journalisation PHP publics désactivés, panne PDO masquée par une
+    réponse générique HTML/JSON. Les 322 vérifications PHP et le scénario Chrome
+    de galerie infinie passent ; aucun warning, fatal ou log applicatif relevé.
+
+3. Galerie infinie — rétablir le classement strict par date
+[x] Remplacer le tri photo_id DESC du flux infini par
+    created_at DESC, photo_id DESC et adapter le curseur aux deux valeurs.
+    Conserver les lots de 5, le filtre hashtag et le chargement au défilement.
+[x] Ajouter un test où l'ordre des dates diffère de celui des identifiants.
+    Conserver les tests de dates identiques, d'insertion/suppression entre lots,
+    de curseur supprimé, de fin du flux, de recherche et de reprise réseau.
+    Terminé le 2026-09-09 : curseur composé date/identifiant validé côté API,
+    requête SQL triée par date puis identifiant et client adapté. Les 322 tests
+    PHP et le scénario DOM Chrome du défilement infini passent.
+
+4. Compatibilité et recette sur navigateurs/appareils
+[ ] Traiter la compatibilité avec les versions minimales citées par le sujet
+    (Firefox 41 / Chrome 46) : les modules ES, import dynamique, async/await,
+    chaînage optionnel et autres fonctions modernes ne permettent pas de
+    revendiquer ces minima actuellement. Ne pas confondre rendu récent et
+    compatibilité historique ; rester dans les technologies autorisées.
+[ ] Recetter sur Firefox et Chrome les parcours complets : inscription,
+    activation, connexion, profil, reset, galerie, interactions et déconnexion
+    en un clic depuis les pages connectées.
+[ ] Vérifier toutes les vues sur téléphone portrait/paysage et petite résolution :
+    header/footer accessibles, formulaires, boutons, modales et défilement.
+    La galerie seule a été inspectée sur Chrome 152 et Firefox 154 durant l'audit.
+[ ] Recetter le studio avec une vraie caméra et avec un upload sans webcam :
+    sélection/désélection de cadre ou sticker, capture bloquée sans filtre,
+    aperçu live, recadrage, composition serveur, miniatures et suppression.
+[ ] Vérifier après sauvegarde la remise à zéro image/cadre/stickers/mots-clés,
+    le maintien du flux déjà actif et son arrêt en quittant le studio.
+    Vérifier aussi une autorisation caméra reçue après avoir quitté la page.
+    Ces corrections sont déjà implémentées ; il reste à les recetter.
+
+5. Livraison réelle des emails
+[ ] Vérifier la réception du lien d'activation dans une boîte réelle.
+[ ] Vérifier la réception et l'utilisation du lien de reset, ainsi que l'invalidation
+    de l'ancien lien et des anciennes sessions.
+[ ] Vérifier la réception d'un email de commentaire par le propriétaire, puis
+    l'absence d'envoi après désactivation de la préférence et sa réactivation.
+[ ] Vérifier également le mail de nouveau like et l'absence de mail au retrait.
+    Les tests automatisés capturent les mails localement ; ils ne prouvent pas
+    la livraison par le SMTP configuré. Vérifier APP_URL pour le destinataire.
+
+6. Déploiement et dépôt de rendu
+[ ] Rejouer make start dans un environnement vierge isolé, avec .env local :
+    construction, disponibilité DB, schéma/migrations et permissions d'uploads.
+    Ne pas utiliser make reset sur les données de travail pour cet essai.
+[ ] Remplacer si nécessaire l'attente fixe de la DB par un contrôle de disponibilité
+    pour rendre le démarrage en une commande fiable.
+[ ] Après corrections, relancer la suite PHP et les tests navigateur concernés,
+    contrôler les consoles et mettre à jour document.md, les rapports et cette todo.
+[ ] Corriger les liens de documentation encore anciens dans readme.md.
+[ ] Vérifier le contenu du commit de rendu : nouveaux tests/rapports inclus,
+    aucun secret/dump de comptes, aucune modification utile oubliée.
+    Des fichiers nouveaux et modifications ne sont pas encore commités.
+
+TERMINÉ ET VÉRIFIÉ — NE PAS RECONSTRUIRE
+
+Sécurité applicative et comptes
+[x] Encoder les données utilisateur dans les vues, le JavaScript et le DOM.
+[x] Protéger les POST privés et les formulaires par CSRF.
+[x] Valider côté serveur types, formats, longueurs, paramètres SQL et images.
+[x] Vérifier XSS, uploads invalides, accès privés et suppression d'un autre compte.
+    Vérification actualisée le 2026-09-09 : 322 tests serveur et suite DOM XSS PASS.
+[x] Lire la configuration DB actuelle depuis l'environnement du .env ignoré.
+    Vérifié le 2026-09-09 par inspection ; les problèmes historiques sont distincts
+    et restent ouverts en priorité 1.
+[x] Implémenter et tester inscription, activation à usage unique, connexion/logout,
+    mot de passe oublié, expiration/remplacement/consommation unique des resets.
+[x] Implémenter le profil, ses validations et la gestion contrôlée des doublons.
+[x] Implémenter le changement de mot de passe et la révocation des autres sessions.
+[x] Préserver les changements indépendants pseudo/email entre appareils et signaler
+    les conflits du même champ ; harmoniser les verrous reset/compte.
+    Vérifié le 2026-09-09 : tests HTTP/SQL et processus PHP concurrents ; la réception
+    réelle des emails et la recette complète des interfaces restent séparées.
+
+Photos et intégrité
+[x] Composer et sauvegarder les montages côté serveur en PNG 1024×1024.
+[x] Utiliser des noms aléatoires de 128 bits avec création exclusive du fichier,
+    publier la ligne après composition et nettoyer après échec SQL.
+[x] Rendre les hashtags partagés robustes aux créations simultanées.
+[x] Gérer les suppressions répétées/concurrentes et vérifier le propriétaire.
+[x] Garantir l'unicité des likes, le toggle concurrent et les cascades ; traiter
+    proprement commentaires/likes sur une photo supprimée.
+    Vérifié le 2026-09-09 : tests de concurrence et d'erreurs injectées dans les
+    322 contrôles. Limites disque/SQL lors d'un incident : audit-concurrence.md.
+[x] Vérifier le canal alpha des filtres déclarés.
+    Vérifié le 2026-09-09 : les 2 cadres et 9 stickers du manifeste ont un canal alpha.
 
 Notifications
-[x] Enregistrer une préférence de notifications email activée par défaut,
-    avec mise à niveau des comptes existants.
-    Terminé le 2026-09-08 : colonne users.email_notifications, migration 002
-    réexécutable sans réinitialiser les choix existants, appliquée à la base locale.
-[x] Permettre d'activer/désactiver cette préférence depuis le profil.
-    Terminé le 2026-09-08 : bouton profil, route POST privée notifications_update,
-    CSRF et valeur 0/1 validés ; sauvegarde en AJAX ou formulaire classique.
-[x] Envoyer un email à l'auteur d'une photo lors d'un nouveau commentaire,
-    en respectant sa préférence ; vérifier réception et désactivation.
-    Terminé le 2026-09-08 : message HTML échappé, liens galerie/profil, destinataire
-    propriétaire ; tests d'émission avec capture locale et désactivation réussis.
-    La livraison réelle dans une boîte externe reste à vérifier avec le SMTP local.
-[x] Envoyer également un email lors d'un nouveau like (demande utilisateur).
-    Terminé le 2026-09-08 : même préférence, aucun email pour un retrait de like,
-    envoi uniquement si une ligne like est effectivement ajoutée.
-    Suite tests/security.php : 253 vérifications réussies, dont échec d'envoi simulé
-    sans perte ni duplication du commentaire. Aucun email externe envoyé durant les tests.
+[x] Enregistrer une préférence email vraie par défaut, y compris après migration
+    des comptes existants ; permettre sa modification depuis le profil.
+[x] Émettre les notifications de commentaire et de nouveau like selon la préférence,
+    sans défaire une interaction enregistrée si l'envoi échoue.
+    Vérifié le 2026-09-09 : tests de capture locale, opt-out/opt-in et panne SMTP.
+    Livraison externe volontairement non cochée, voir priorité 5.
 
 Galerie
-[x] Ajouter une pagination accessible avec au moins 5 éléments par page.
-    Terminé le 2026-09-08 : 12 photos par page, précédente/suivante, total/pages,
-    filtre hashtag conservé et retour page 1 lors d'une nouvelle recherche.
-    Page/filtre conservés dans l'URL pour rechargement ou partage ; tri date/id stable.
-    Page hors limites ramenée à la dernière existante, recherche vide, erreurs réseau
-    avec bouton Réessayer et réponses AJAX obsolètes gérées.
-    Vérification : 268 tests serveur réussis ; tests Chrome pagination et XSS PASS ;
-    syntaxes PHP/JS et git diff --check OK.
+[x] Remplacer la pagination à boutons par des lots de 5 en défilement infini.
+[x] Préserver les cartes déjà chargées, le filtre et la visionneuse ; gérer erreurs,
+    reprise, réponses obsolètes et nettoyage à la sortie de page.
+[x] Tester le curseur actuel face aux insertions et suppressions.
+    Vérifié le 2026-09-09 : tests/cursor_cases.php et tests/pagination-dom.html PASS.
+    Le curseur composé reste valide après suppression de sa ligne et ne décale
+    pas les lots lors d'une insertion plus récente.
 
-Studio
-[ ] Désactiver le bouton de capture tant qu'aucun cadre/sticker n'est sélectionné.
-    Actuellement seule la création du montage exige une superposition.
-    Vérifier sélection, désélection et activation de la webcam.
-
-Validation finale
-[ ] Retirer les traces de debug navigateur et serveur, notamment console.info
-    du studio et journalisation systématique du parcours d'inscription.
-[ ] Vérifier les parcours inscription, validation email, connexion et déconnexion
-    en un clic depuis toutes les pages, ainsi que les nouveaux parcours du compte.
-[ ] Vérifier webcam et upload, PNG transparents, composition finale côté serveur,
-    miniatures et suppression limitée au propriétaire.
-[ ] Vérifier galerie publique triée par date, likes/commentaires réservés aux
-    utilisateurs connectés, pagination et notifications.
-[ ] Vérifier l'affichage mobile/petites résolutions et le fonctionnement Chrome/Firefox.
-[ ] Vérifier le déploiement depuis un environnement vierge en une commande
-    (make start existe), avec initialisation DB et permissions des uploads.
-[ ] Vérifier l'absence d'erreurs, warnings et traces de debug pendant les parcours.
-[ ] Actualiser document.md : ses sections sur la galerie, le studio et les routes
-    décrivent encore certaines fonctionnalités déjà implémentées comme absentes.
-
-DÉJÀ IMPLÉMENTÉ DANS LE CODE — À VALIDER EN CONDITIONS RÉELLES
-Ces éléments ne sont pas à reconstruire ; leur présence ne vaut pas recette complète.
-- Inscription, complexité du mot de passe, hash, validation email, connexion/logout.
-- Studio privé avec webcam/upload et recadrage.
-- Catalogue de cadres/stickers PNG transparents et sélection visuelle.
-- Route de création et composition finale GD côté serveur, sauvegarde PNG et SQL.
-- Validation des images sources et des superpositions côté serveur.
-- Miniatures des créations et suppression avec contrôle du propriétaire.
-- Galerie publique triée par date, likes et commentaires avec contrôle de connexion.
-- Structure header/main/footer, styles responsive, Docker Compose et make start.
+Documentation et contrôles
+[x] Réécrire document.md selon l'état réel et auditer toutes les exigences du PDF 4.1.
+    Terminé le 2026-09-09 : matrice avec preuves, écarts et validations restantes.
+[x] Inspecter la galerie réelle en format mobile et bureau sur deux navigateurs.
+    Vérifié le 2026-09-09 : Chrome 152 à 390×844, Firefox 154 à 1280×900.
+    Ce contrôle limité ne remplace pas la recette mobile complète.
+[x] Actualiser cette todo avec les travaux à effectuer cet après-midi.
+    Terminé le 2026-09-09 : anciens états « profil absent », « pagination 12 photos »
+    et « pagination infinie à construire » retirés ; limites conservées.
 
 BONUS — APRÈS VALIDATION COMPLÈTE DU MANDATORY
 Le sujet exige un mandatory parfait avant évaluation des bonus.
-[ ] Valider les échanges AJAX déjà largement implémentés : navigation, compte,
-    studio, galerie, likes et commentaires.
-[ ] Valider l'aperçu live des superpositions sur la webcam, déjà implémenté.
-[ ] Option : ajouter une pagination infinie fonctionnelle à la galerie.
-[ ] Option : proposer le partage des images sur les réseaux sociaux.
-[ ] Option : générer un GIF animé.
-[ ] Évaluer et valider les bonus candidats existants : crop avec zoom, déplacement/
-    redimensionnement/rotation des stickers, calques et recherche par hashtags.
-    Leur valorisation dépend de leur qualité, utilité et impact technique.
+[x] Implémenter le défilement infini et valider les échanges AJAX couverts par les tests.
+    Vérifié le 2026-09-09 avec tri date/identifiant et curseur composé.
+[ ] Terminer la recette de l'aperçu live, déjà implémenté.
+[ ] Valider les bonus candidats : recadrage/zoom, déplacement/redimensionnement/
+    rotation et empilement de stickers, recherche par hashtags.
+[ ] Option : partage des images sur les réseaux sociaux.
+[ ] Option : génération d'un GIF animé.
 
-AMÉLIORATIONS OPTIONNELLES CONSERVÉES DE L'ANCIENNE TODO
-[ ] Afficher une vraie page 404 avec lien vers l'accueil pour une route inconnue.
-[ ] Option : permettre la création ou l'upload de filtres PNG personnels,
-    avec validation serveur et gestion des droits adaptées.
+AMÉLIORATIONS OPTIONNELLES — DISTINCTES DES ÉCARTS AU SUJET
+[ ] Retirer les permissions 777, limiter l'exposition de MariaDB et figer les images Docker.
+[ ] Maîtriser les dépendances CSS/icônes CDN pour la soutenance.
+[ ] Prévoir une réconciliation des fichiers et de la BDD après incident.
+[ ] Adapter le script inline puis tester une CSP en Report-Only avant activation.
+[ ] Ajouter une véritable page 404 avec retour à l'accueil.
+[ ] Option : création/upload de filtres personnels avec validation et droits adaptés.
 
-HISTORIQUE
-2026-09-08 : remplacement de l'ancienne liste par le suivi issu de l'audit.
-Aucune modification fonctionnelle ni recette navigateur réalisée à cette occasion.
-
-2026-09-08 : CSRF et mot de passe oublié cochés sur confirmation utilisateur,
-avec vérification de leur présence et des cas de test dans le code actuel.
-
-2026-09-08 : encodage du pseudo confirmé corrigé ; exécution de
-docker compose exec -T app php tests/security.php : 64 vérifications réussies,
-y compris XSS du pseudo, CSRF et mot de passe oublié. Aucun mail externe envoyé.
-
-2026-09-08 — Audit XSS ciblé (rapport : camagru/docs/audit-xss.md)
-[x] Auditer et protéger les sorties HTML PHP et les injections DOM de données utilisateur.
-    Vérifications : 84 tests HTTP/PHP réussis, test DOM Chrome headless PASS avec
-    les charges XSS demandées ; syntaxes PHP/JS et recherche finale des sinks OK.
-    Correctifs : frontière JSON/HTML du routeur, échappements explicites, compteur
-    de commentaires en textContent, validation des URL photos et filtres.
-[ ] Adapter le script inline et valider la CSP proposée en Report-Only avant activation.
-    Conserver les tests interactifs Firefox/mobile/webcam dans la recette finale.
-
-2026-09-08 : tâches Compte utilisateur terminées. Notifications laissées dans leur
-section dédiée ; suppression du faux interrupteur non fonctionnel de la vue profil.
-
-2026-09-08 : notifications commentaires/likes et réglage profil implémentés ;
-migration locale appliquée, syntaxe PHP/JS et 253 tests validés.
-
-2026-09-08 — Affichage mobile
-[x] Garder l'en-tête et le pied de page visibles pendant le défilement mobile.
-    Suppression des règles faisant défiler body ; grille limitée à la hauteur
-    du viewport et défilement interne du contenu, y compris dans le studio.
-    Vérification Chrome headless à 500 px de largeur : barres immobiles, contenu
-    défilable jusqu'en bas, sans chevauchement (galerie et studio longs simulés).
-    La recette complète sur téléphones physiques reste distincte.
+HISTORIQUE SYNTHÉTIQUE
+2026-09-08 : sécurisation XSS/CSRF/validation ; reset, profil et notifications ;
+            pagination numérotée et corrections du shell mobile.
+2026-09-09 : remise à zéro du studio et capture conditionnée par un filtre ;
+            lots de 5 ; audit/corrections de concurrence ; défilement infini.
+2026-09-09 : 322 vérifications serveur réussies, tests DOM XSS/défilement infini PASS,
+            contrôle visuel galerie Chrome/Firefox et audit du sujet dans document.md.
+2026-09-09 : todo actualisée. Les corrections finales sont planifiées pour cet
+            après-midi ; aucune de ces corrections n'est réalisée par cette mise à jour.
+2026-09-09 : dump, anciens secrets DB et montages générés retirés des historiques
+            local et distant ; secret MariaDB renouvelé et application revérifiée.

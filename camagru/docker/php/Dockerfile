@@ -18,9 +18,18 @@ RUN openssl req -x509 -nodes -days 365 \
     -keyout /etc/ssl/private/camagru-selfsigned.key \
     -out /etc/ssl/certs/camagru-selfsigned.crt \
     -subj "/C=FR/ST=Dev/L=Local/O=Camagru/CN=localhost" \
-    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+    -addext "basicConstraints=critical,CA:FALSE" \
+    -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+    -addext "extendedKeyUsage=serverAuth"
 COPY default-ssl.conf /etc/apache2/sites-available/default-ssl.conf
-RUN a2ensite default-ssl
+COPY camagru.conf /etc/apache2/conf-available/camagru.conf
+RUN a2ensite default-ssl && a2enconf camagru && \
+    sed -i '/CustomLog/d; /ErrorLog/d' /etc/apache2/sites-available/000-default.conf /etc/apache2/conf-available/other-vhosts-access-log.conf
+COPY apache-error-log.sh /usr/local/bin/apache-error-log
+RUN chmod 755 /usr/local/bin/apache-error-log
+COPY uploads-permissions.sh /usr/local/bin/uploads-permissions
+RUN chmod 755 /usr/local/bin/uploads-permissions
 
 # 3. Configuration de PHP pour utiliser msmtp
 COPY custom.ini /usr/local/etc/php/conf.d/custom.ini
@@ -30,7 +39,8 @@ COPY msmtprc.template /etc/msmtprc.template
 
 # 5. COMMANDE DE LANCEMENT (TOUJOURS À LA FIN)
 # Cette commande génère le fichier de mail ET lance Apache
-CMD envsubst < /etc/msmtprc.template > /etc/msmtprc && \
+CMD uploads-permissions && \
+    envsubst < /etc/msmtprc.template > /etc/msmtprc && \
     chmod 600 /etc/msmtprc && \
     chown www-data:www-data /etc/msmtprc && \
-    apache2-foreground
+    exec apache2-foreground

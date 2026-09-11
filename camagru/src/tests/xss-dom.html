@@ -16,7 +16,7 @@ try {
     window.fetch = async url => ({ ok: true, json: async () => {
         if (url.includes('photo_hashtag_list')) return {success: true, hashtags: [{hashtag: payloads[0], photos_count: payloads[1]}]};
         if (url.includes('photo_comments')) return {success: true, comments: payloads.map(value => ({username: value, comment: value}))};
-        return {success: true, pagination: {total: 3, offset: 0, limit: 12}, photos: payloads.map((value, i) => ({photo_id: i+1, path: 'uploads/photos/1/1.png', username: value, comments_count: value, created_at: '2026-09-08 10:00:00'}))};
+        return {success: true, pagination: {has_more: false, next_cursor: null}, photos: payloads.map((value, i) => ({photo_id: i+1, path: 'uploads/photos/1/1.png', username: value, comments_count: value, created_at: '2026-09-08 10:00:00'}))};
     }});
     init(); await tick();
     check(document.querySelectorAll('.gallery-card').length === 3, 'Gallery cards render');
@@ -29,6 +29,8 @@ try {
     check(document.querySelector('#galleryViewerImage').alt.includes(payloads[0]), 'Viewer attribute preserved');
     ['//evil.test/x', 'javascript:alert(1)', '../x', 'uploads/photos/1/1.png?x'].forEach(path => check(photoUrl(path) === '/images/favicon.png', 'Untrusted URL rejected'));
     check(photoUrl('uploads/photos/1/1.png') === '/uploads/photos/1/1.png', 'Valid photo URL retained');
+    const randomPhoto = 'uploads/photos/42/9a82f3c6d80000000000000000000000.png';
+    check(photoUrl(randomPhoto) === '/' + randomPhoto, 'Random photo URL accepted');
     window.fetch = async () => new Response(JSON.stringify({comment: payloads[0]}), {headers: {'Content-Type': 'application/json'}});
     loadPage('photo_comments'); await tick();
     check(document.getElementById('content').textContent === 'Erreur lors du chargement.', 'Router rejects JSON before HTML parsing');

@@ -5,52 +5,69 @@ const check = (ok, label) => { if (!ok) throw new Error(label); };
 const tick = (ms = 80) => new Promise(resolve => setTimeout(resolve, ms));
 const content = document.getElementById('content');
 window.userConfig = {isLoggedIn: false, csrfToken: 'test'};
+let observer;
+window.IntersectionObserver = class {
+    constructor(callback) { this.callback = callback; observer = this; }
+    observe() { this.active = true; }
+    unobserve() { this.active = false; }
+    disconnect() { this.active = false; }
+    enter() { if (this.active) this.callback([{isIntersecting: true}]); }
+};
 let fail = false;
-let requested = [];
+const requested = [];
 try {
-    content.innerHTML = await fetch('/fixture').then(r => r.text()); // Trusted repository template.
-    window.fetch = async url => {
+    content.innerHTML = await fetch('/fixture').then(r => r.text());
+    window.fetch = async (url, options = {}) => {
         const params = new URL(url, location.origin).searchParams;
         if (params.get('page') === 'photo_hashtag_list') return {ok: true, json: async () => ({success: true, hashtags: []})};
+        check(params.get('limit') === '5' && params.get('cursor') === '1' && !params.has('offset'), 'Cursor batches of five');
         const tag = params.get('hashtag') || '';
-        const offset = Number(params.get('offset'));
-        requested.push({tag, offset});
+        const before = Number(params.get('before_id') || 100);
+        const beforeDate = params.get('before_created_at');
+        check((before === 100 && beforeDate === null) || beforeDate === '2026-09-08 10:00:00', 'Composite cursor contains date and id');
+        requested.push({tag, before, beforeDate, signal: options.signal});
         if (fail) throw new Error('offline');
         if (tag === 'lent') await tick(300);
-        const total = tag === 'vide' ? 0 : tag ? 13 : 31;
-        return {ok: true, json: async () => ({success: true, pagination: {total, offset, limit: 12},
-            photos: Array.from({length: Math.min(12, Math.max(0, total-offset))}, (_, i) => ({photo_id: offset+i+1,
-                username: tag || 'Auteur', path: 'uploads/photos/1/1.png', created_at: '2026-09-08 10:00:00'}))})};
+        const total = tag === 'vide' ? 0 : tag ? 8 : 12;
+        const ids = Array.from({length: total}, (_, i) => total-i).filter(id => id < before);
+        const batch = ids.slice(0, 5);
+        return {ok: true, json: async () => ({success: true,
+            pagination: {has_more: ids.length > 5, next_cursor: ids.length > 5 ? {created_at: '2026-09-08 10:00:00', photo_id: batch.at(-1)} : null},
+            photos: batch.map(id => ({photo_id: id, username: tag || 'Auteur', path: 'uploads/photos/1/1.png', created_at: '2026-09-08 10:00:00'}))})};
     };
     history.replaceState({}, '', '/pagination?page=gallery&gallery_page=2');
     init(); await tick();
-    const previous = document.getElementById('galleryPreviousPage');
     const next = document.getElementById('galleryNextPage');
     const status = document.getElementById('galleryPageStatus');
     const search = document.getElementById('gallerySearchInput');
     const form = document.getElementById('gallerySearchForm');
     const submit = tag => { search.value = tag; form.dispatchEvent(new Event('submit', {cancelable: true})); };
-    check(status.textContent.includes('Page 2 sur 3') && document.querySelectorAll('.gallery-card').length === 12, 'Bookmark page 2');
+    const cards = () => document.querySelectorAll('.gallery-card');
+    check(cards().length === 5 && observer.active && !new URL(location.href).searchParams.has('gallery_page'), 'Initial batch and observer');
+    const firstCard = cards()[0];
+    observer.enter(); observer.enter(); await tick();
+    check(cards().length === 10 && cards()[0] === firstCard && requested.length === 2 && requested.at(-1).before === 8, 'Intersection appends once without replacing cards');
+    cards()[0].querySelector('.gallery-photo-button').click();
     next.click(); await tick();
-    check(status.textContent.includes('Page 3 sur 3') && next.disabled && document.querySelectorAll('.gallery-card').length === 7, 'Last page and disabled next');
-    previous.click(); await tick();
-    check(status.textContent.includes('Page 2 sur 3'), 'Previous page');
+    check(cards().length === 12 && next.hidden && !observer.active && status.textContent.includes('tout vu'), 'Final batch stops infinite loading');
+    check(document.getElementById('galleryViewerCounter').textContent === '1 / 12' && !document.getElementById('galleryViewerModal').hidden, 'Viewer remains open and includes appended photos');
     submit('chat'); await tick();
-    check(previous.disabled && status.textContent.includes('Page 1 sur 2'), 'Search resets page');
-    next.click(); await tick();
-    check(requested.at(-1).tag === 'chat' && requested.at(-1).offset === 12 && next.disabled, 'Filter retained on page 2');
+    check(cards().length === 5 && requested.at(-1).before === 100, 'Filter resets gallery and cursor');
     fail = true;
-    previous.click(); await tick();
-    check(!document.getElementById('galleryRetry').hidden && status.textContent.includes('Page 2'), 'Error preserves current page and offers retry');
+    observer.enter(); await tick();
+    check(cards().length === 5 && !document.getElementById('galleryRetry').hidden && !observer.active, 'Error preserves cards and pauses auto loading');
     fail = false;
     document.getElementById('galleryRetry').click(); await tick();
-    check(status.textContent.includes('Page 1 sur 2'), 'Retry works');
-    submit('lent'); submit('rapide'); await tick(400);
-    check(search.value === 'rapide' && document.querySelector('.gallery-meta strong').textContent === 'rapide', 'Late response ignored');
+    check(cards().length === 8 && requested.at(-1).tag === 'chat' && requested.at(-1).before === 4 && next.hidden, 'Retry uses same filter and cursor');
+    submit('lent'); const slowSignal = requested.at(-1).signal; submit('rapide'); await tick(400);
+    check(slowSignal.aborted && cards().length === 5 && document.querySelector('.gallery-meta strong').textContent === 'rapide', 'New search aborts and ignores old response');
     submit('vide'); await tick();
-    check(status.textContent === 'Aucune photo' && next.disabled && previous.disabled, 'Empty results');
+    check(status.textContent === 'Aucune photo' && next.hidden && !observer.active, 'Empty search stops loading');
     document.getElementById('galleryResetSearch').click(); await tick();
-    check(status.textContent.includes('Page 1 sur 3') && !new URL(location.href).searchParams.has('hashtag'), 'Reset clears filter and page');
-    document.getElementById('results').textContent = 'PASS: pagination, bookmarks, filters, boundaries, retry and request races';
+    check(cards().length === 5 && !new URL(location.href).searchParams.has('hashtag'), 'Reset starts a fresh gallery');
+    submit('lent'); const leavingSignal = requested.at(-1).signal;
+    window.dispatchEvent(new Event('app:page-leave')); await tick(400);
+    check(leavingSignal.aborted && !observer.active && cards().length === 0, 'Leaving page disconnects observer and ignores pending results');
+    document.getElementById('results').textContent = 'PASS: infinite scrolling, five-photo cursor batches, append, end, filters, retry, viewer and cleanup';
 } catch (error) { document.getElementById('results').textContent = 'FAIL: ' + error.message; }
 </script>

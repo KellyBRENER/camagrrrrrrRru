@@ -1,8 +1,6 @@
 import { photoUrl } from "../image-paths.js";
 
 export async function init() {
-    console.info("[STUDIO] init");
-
     const startBtn = document.getElementById("startCamera");
 
     if (!startBtn) {
@@ -44,6 +42,7 @@ export async function init() {
     const nextPhotoViewerBtn = document.getElementById("nextPhotoViewer");
 
     let stream = null;
+    let disposed = false;
     let uploadedImageUrl = null;
     let cropState = null;
     let currentGalleryIndex = 0;
@@ -55,6 +54,9 @@ export async function init() {
     const createdPhotos = [];
     const acceptedUploadTypes = ["image/png", "image/jpeg"];
     const maxUploadSize = 10 * 1024 * 1024;
+    const maxUploadPixels = 20000000;
+    // Match the server output; larger sources only inflate the PNG/base64 request.
+    const maxPreparedImageSize = 1024;
     const maxStickers = 10;
     const stickerState = {
         x: 50,
@@ -75,7 +77,6 @@ export async function init() {
     };
 
     if (!startBtn || !captureBtn || !cropBtn || !uploadBtn || !uploadInput || !video || !canvas || !preview || !frameFiltersList || !stickerFiltersList || !cropModal || !cropFrame || !cropImage || !validateCropBtn || !cancelCropBtn || !cancelCropAction || !cropZoomRange || !zoomCropIn || !zoomCropOut || !createMontageBtn || !createMontageStatus || !photoHashtagsInput || !hashtagsModal || !hashtagsMontageStatus || !validateHashtagsBtn || !cancelHashtagsBtn || !cancelHashtagsAction || !myGallery || !photoViewerModal || !photoViewerImage || !photoViewerCounter || !closePhotoViewerBtn || !prevPhotoViewerBtn || !nextPhotoViewerBtn) {
-        console.error("La page studio n'a pas tous les éléments attendus.");
         return;
     }
 
@@ -97,7 +98,7 @@ export async function init() {
 
     const hasSelectedFilter = () => Boolean(selectedFrame || stickerInstances.length > 0);
 
-    const canCaptureFromCamera = () => Boolean(stream && video.videoWidth && video.videoHeight);
+    const canCaptureFromCamera = () => Boolean(stream && video.videoWidth && video.videoHeight && hasSelectedFilter());
 
     const canCreateMontage = () => Boolean(getCapturedImage()?.src && hasSelectedFilter());
 
@@ -105,10 +106,34 @@ export async function init() {
 
     const syncCaptureButtonState = () => {
         captureBtn.disabled = !canCaptureFromCamera();
+        captureBtn.title = hasSelectedFilter() ? "Capturer" : "Sélectionnez un sticker ou un cadre avant de capturer";
         createMontageBtn.disabled = !canCreateMontage();
         startBtn.classList.toggle("is-active", Boolean(stream));
         startBtn.setAttribute("aria-pressed", stream ? "true" : "false");
     };
+
+    const stopCamera = () => {
+        stream?.getTracks().forEach((track) => track.stop());
+        if (window.currentStream === stream) {
+            window.currentStream = null;
+        }
+        stream = null;
+        video.srcObject = null;
+        syncCaptureButtonState();
+    };
+
+    const dispose = () => {
+        disposed = true;
+        stopCamera();
+        if (uploadedImageUrl) {
+            URL.revokeObjectURL(uploadedImageUrl);
+            uploadedImageUrl = null;
+        }
+        window.removeEventListener("pagehide", dispose);
+        window.removeEventListener("app:page-leave", dispose);
+    };
+    window.addEventListener("pagehide", dispose);
+    window.addEventListener("app:page-leave", dispose);
 
     const getActiveSticker = () => stickerInstances.find((sticker) => sticker.uid === activeStickerUid) || null;
 
@@ -387,7 +412,6 @@ export async function init() {
                 stickerFiltersList.innerHTML = '<p class="studio-filters-empty">Aucun sticker disponible.</p>';
             }
         } catch (error) {
-            console.error("[STUDIO] impossible de charger les filtres", error);
             frameFiltersList.innerHTML = '<p class="studio-filters-empty">Impossible de charger les cadres.</p>';
             stickerFiltersList.innerHTML = '<p class="studio-filters-empty">Impossible de charger les stickers.</p>';
         }
@@ -461,9 +485,28 @@ export async function init() {
             uploadInput.value = "";
         }
 
-        if (stream) {
-            video.style.display = "block";
-        }
+        uploadInput.value = "";
+        cropImage.onload = null;
+        cropImage.removeAttribute("src");
+        cropImage.style.transform = "";
+        cropImage.style.width = "";
+        cropImage.style.height = "";
+        cropZoomRange.value = "100";
+        photoHashtagsInput.value = "";
+        stickerInstances.forEach((sticker) => {
+            sticker.previewBox.remove();
+            sticker.cropBox.remove();
+        });
+        stickerInstances.length = 0;
+        layers.length = 0;
+        selectedFrame = null;
+        activeStickerUid = null;
+        nextLayerUid = 1;
+        stickerState.isDragging = false;
+        stickerState.isResizing = false;
+        stickerState.isRotating = false;
+        stickerState.pointerId = null;
+        video.style.display = stream ? "block" : "none";
 
         syncFilterOverlays();
         syncCaptureButtonState();
@@ -636,7 +679,6 @@ export async function init() {
                 }
             }
         } catch (error) {
-            console.error("[STUDIO] impossible de supprimer le montage", error);
             alert("Impossible de supprimer ce montage.");
         }
     };
@@ -723,7 +765,6 @@ export async function init() {
 
             createdPhotos.forEach((photo) => renderCreatedPhotoItem(photo));
         } catch (error) {
-            console.error("[STUDIO] impossible de charger les montages", error);
             myGallery.innerHTML = '<p class="studio-gallery-empty">Impossible de charger vos montages.</p>';
         }
     };
@@ -757,7 +798,6 @@ export async function init() {
             closeHashtagsModal();
             setCreateStatus("Montage ajoute a vos creations.");
         } catch (error) {
-            console.error("[STUDIO] impossible de creer le montage", error);
             if (error.message === "IMAGE_MISSING") {
                 setCreateStatus("Capturez ou recadrez une image avant de creer le montage.");
             } else if (error.message === "TOO_MANY_HASHTAGS") {
@@ -869,7 +909,16 @@ export async function init() {
         cropImage.style.width = "";
         cropImage.style.height = "";
 
+        cropImage.onerror = () => {
+            cancelImageCrop();
+            setCreateStatus("Image illisible. Choisissez un fichier PNG ou JPEG valide.");
+        };
         cropImage.onload = () => {
+            if (cropImage.naturalWidth * cropImage.naturalHeight > maxUploadPixels) {
+                cancelImageCrop();
+                setCreateStatus("L’image ne doit pas dépasser 20 millions de pixels. Réduisez ses dimensions avant de l’importer.");
+                return;
+            }
             const frameWidth = cropFrame.clientWidth;
             const frameHeight = cropFrame.clientHeight;
             const baseScale = Math.max(frameWidth / cropImage.naturalWidth, frameHeight / cropImage.naturalHeight);
@@ -923,8 +972,9 @@ export async function init() {
         const sourceWidth = cropState.frameWidth / cropState.currentScale;
         const sourceHeight = cropState.frameHeight / cropState.currentScale;
 
-        canvas.width = Math.max(1, Math.round(sourceWidth));
-        canvas.height = Math.max(1, Math.round(sourceHeight));
+        const scale = Math.min(1, maxPreparedImageSize / Math.max(sourceWidth, sourceHeight));
+        canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+        canvas.height = Math.max(1, Math.round(sourceHeight * scale));
 
         const context = canvas.getContext("2d");
 
@@ -974,7 +1024,11 @@ export async function init() {
     };
 
     startBtn.addEventListener("click", async () => {
-        console.info("[STUDIO] start camera clicked");
+        if (stream) {
+            showCameraPreview();
+            return;
+        }
+        startBtn.disabled = true;
 
         try {
             if (!window.isSecureContext && !isLocalTrustedHost()) {
@@ -995,17 +1049,26 @@ export async function init() {
                     audio: false
                 });
             } catch (cameraErr) {
-                console.warn("Impossible d'utiliser la contrainte facingMode, nouvelle tentative simple.", cameraErr);
+                if (disposed || !video.isConnected) return;
                 stream = await getCameraStream({
                     video: true,
                     audio: false
                 });
             }
 
+            if (disposed || !video.isConnected) {
+                stopCamera();
+                return;
+            }
+            window.currentStream = stream;
             video.srcObject = stream;
             video.muted = true;
             video.playsInline = true;
             await video.play();
+            if (disposed || !video.isConnected) {
+                stopCamera();
+                return;
+            }
 
             showCameraPreview();
 
@@ -1015,8 +1078,9 @@ export async function init() {
             syncCaptureButtonState();
 
         } catch (err) {
+            stopCamera();
+            if (disposed) return;
 
-            console.error(err);
             if (err.message === "GET_USER_MEDIA_UNAVAILABLE") {
                 alert("Votre navigateur ne permet pas d'accéder à la caméra.");
                 return;
@@ -1034,11 +1098,17 @@ export async function init() {
 
             alert("Impossible d'accéder à la caméra.");
 
+        } finally {
+            startBtn.disabled = false;
         }
 
     });
 
     captureBtn.addEventListener("click", () => {
+        if (!hasSelectedFilter()) {
+            alert("Sélectionnez un sticker ou un cadre avant de capturer une photo.");
+            return;
+        }
         if (!stream || !video.videoWidth || !video.videoHeight) {
             alert("Démarrez la caméra avant de capturer une photo.");
             return;
@@ -1048,8 +1118,8 @@ export async function init() {
         const sourceX = Math.max(0, (video.videoWidth - sourceSize) / 2);
         const sourceY = Math.max(0, (video.videoHeight - sourceSize) / 2);
 
-        canvas.width = sourceSize;
-        canvas.height = sourceSize;
+        canvas.width = Math.min(sourceSize, maxPreparedImageSize);
+        canvas.height = canvas.width;
 
         const context = canvas.getContext("2d");
         context.drawImage(

@@ -24,16 +24,13 @@ function loadPageScript(page) {
         return;
     }
 
-    console.info('[ROUTER] loading page script', { page, scriptName });
-
     import(`/js/pages/${scriptName}.js?v=${encodeURIComponent(window.userConfig.scriptVersion)}`)
         .then(module => {
             if (module.init) {
-                console.info('[ROUTER] init page script', { page, scriptName });
                 module.init();
             }
         })
-        .catch(err => console.error("impossible de charger le script de la page", err));
+        .catch(() => {});
 }
 
 // utils.js - fonctions utilitaires pour l'application
@@ -44,7 +41,11 @@ export function loadPage(page, queryParams = new URLSearchParams()) {
     const pageUrl = `index.php?${params.toString()}`;
     const nextUrl = `?${params.toString()}`;
 
-    console.info('[ROUTER] loadPage called', { page, url: pageUrl });
+    window.dispatchEvent(new Event('app:page-leave'));
+    if (window.currentStream) {
+        window.currentStream.getTracks().forEach(track => track.stop());
+        window.currentStream = null;
+    }
     document.getElementById('content').innerHTML = '<p>Chargement...</p>';
 
     // On utilise l'index.php avec l'en-tête X-Requested-With
@@ -65,12 +66,6 @@ export function loadPage(page, queryParams = new URLSearchParams()) {
     })
     .then(html => {
         if (html === null) return;
-        // Nettoyage Webcam si on change de page
-        if (window.currentStream) {
-            window.currentStream.getTracks().forEach(track => track.stop());
-            window.currentStream = null;
-        }
-
         document.getElementById('content').innerHTML = html;
         setActiveFooterTab(page);
 
@@ -96,8 +91,6 @@ export function router(shouldFetch = true) {
     // 1. On récupère la page dans l'URL actuelle
     const urlParams = new URLSearchParams(window.location.search);
     const page = urlParams.get('page') || 'home';
-    console.info('[ROUTER] router resolved page', { page, shouldFetch });
-
     if (shouldFetch) {
         loadPage(page, urlParams);
         return;

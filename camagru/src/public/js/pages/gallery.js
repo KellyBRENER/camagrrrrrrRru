@@ -18,17 +18,21 @@ export function init() {
     let galleryPhotos = [];
     let currentViewerIndex = 0;
     let activeHashtag = "";
-    const pageSize = 12;
-    const previousPage = document.getElementById("galleryPreviousPage");
+    const pageSize = 5;
+    const sentinel = document.getElementById("galleryLoadMore");
     const nextPage = document.getElementById("galleryNextPage");
     const pageStatus = document.getElementById("galleryPageStatus");
     const retry = document.getElementById("galleryRetry");
-    let currentPage = 1;
-    let totalPages = 1;
+    let cursor = null;
+    let hasMore = true;
+    let loading = false;
+    let disposed = false;
+    let requestController = null;
+    let observer = null;
     let requestVersion = 0;
-    let lastRequest = ["", 1];
+    let lastRequest = ["", false];
 
-    if (!container || !searchForm || !searchInput || !searchResetBtn || !suggestions || !searchStatus || !viewerModal || !viewerImage || !viewerCounter || !closeViewerBtn || !prevViewerBtn || !nextViewerBtn) {
+    if (!sentinel || !nextPage || !pageStatus || !retry || !container || !searchForm || !searchInput || !searchResetBtn || !suggestions || !searchStatus || !viewerModal || !viewerImage || !viewerCounter || !closeViewerBtn || !prevViewerBtn || !nextViewerBtn) {
         return;
     }
 
@@ -130,7 +134,6 @@ export function init() {
             const result = await apiJson(`/?page=photo_comments&photo_id=${encodeURIComponent(photo.photo_id)}`);
             renderComments(panel, result.comments || []);
         } catch (error) {
-            console.error("[GALLERY] impossible de charger les commentaires", error);
             panel.querySelector(".gallery-comments-list").innerHTML = '<p class="gallery-comments-empty">Impossible de charger les commentaires.</p>';
         }
     };
@@ -249,7 +252,6 @@ export function init() {
                 photo.likes_count = result.likes_count;
                 syncLikeButton(likeBtn, photo);
             } catch (error) {
-                console.error("[GALLERY] impossible de liker", error);
                 alert("Impossible de modifier ce like.");
             } finally {
                 likeBtn.disabled = false;
@@ -311,7 +313,6 @@ export function init() {
                     commentsBtn.querySelector(".gallery-action-count").textContent = String(result.comments_count);
                     renderComments(commentsPanel, result.comments || []);
                 } catch (error) {
-                    console.error("[GALLERY] impossible de commenter", error);
                     alert(error.message === "Commentaire limite a 500 caracteres."
                         ? "Le commentaire est limite a 500 caracteres."
                         : "Impossible d'ajouter ce commentaire.");
@@ -365,58 +366,111 @@ export function init() {
         photos.forEach((photo) => container.appendChild(createPhotoCard(photo)));
     };
 
-    const loadGallery = async (hashtag = "", requestedPage = 1) => {
+    const loadGallery = async (hashtag = "", append = false) => {
+        if (disposed || (append && (loading || !hasMore))) return;
         const version = ++requestVersion;
-        lastRequest = [hashtag, requestedPage];
-        previousPage.disabled = true;
+        requestController?.abort();
+        requestController = new AbortController();
+        observer?.unobserve(sentinel);
+        lastRequest = [hashtag, append];
+        loading = true;
         nextPage.disabled = true;
         retry.hidden = true;
         container.setAttribute("aria-busy", "true");
-        try {
-            const query = new URLSearchParams({ page: "photo_public_list", limit: pageSize,
-                offset: (requestedPage - 1) * pageSize });
-            if (hashtag) query.set("hashtag", hashtag);
-            const result = await apiJson(`/?${query}`);
-            if (version !== requestVersion || !container.isConnected) return;
-            const photos = result.photos || [];
-            const pagination = result.pagination;
-            currentPage = Math.floor(pagination.offset / pageSize) + 1;
-            totalPages = Math.max(1, Math.ceil(pagination.total / pageSize));
+        pageStatus.textContent = "Chargement...";
+        if (!append) {
             activeHashtag = hashtag;
+            cursor = null;
+            hasMore = true;
+            galleryPhotos = [];
+            setEmpty("Chargement de la galerie...");
             searchInput.value = hashtag;
             searchResetBtn.hidden = hashtag === "";
             closeViewer();
+        }
+        try {
+            const query = new URLSearchParams({ page: "photo_public_list", limit: pageSize, cursor: 1 });
+            if (cursor !== null) {
+                query.set("before_created_at", cursor.created_at);
+                query.set("before_id", cursor.photo_id);
+            }
+            if (hashtag) query.set("hashtag", hashtag);
+            const result = await apiJson(`/?${query}`, { signal: requestController.signal });
+            if (version !== requestVersion || disposed || !container.isConnected) return;
+            const photos = result.photos || [];
+            const seen = new Set(galleryPhotos.map(photo => Number(photo.photo_id)));
+            const additions = photos.filter(photo => {
+                const id = Number(photo.photo_id);
+                if (seen.has(id)) return false;
+                seen.add(id);
+                return true;
+            });
+            if (!append) {
+                renderGallery(additions, hashtag
+                    ? "Aucune photo ne correspond à ce hashtag."
+                    : "Aucun montage pour le moment.");
+            } else {
+                galleryPhotos.push(...additions);
+                additions.forEach(photo => container.appendChild(createPhotoCard(photo)));
+                if (!viewerModal.hidden) refreshViewer();
+            }
+            const nextCursor = result.pagination.next_cursor;
+            const validNextCursor = nextCursor !== null
+                && typeof nextCursor === "object"
+                && typeof nextCursor.created_at === "string"
+                && Number.isInteger(nextCursor.photo_id)
+                && nextCursor.photo_id > 0;
+            const movesForward = cursor === null || (validNextCursor
+                && (nextCursor.created_at < cursor.created_at
+                    || (nextCursor.created_at === cursor.created_at && nextCursor.photo_id < cursor.photo_id)));
+            hasMore = result.pagination.has_more === true && validNextCursor && movesForward;
+            cursor = validNextCursor ? nextCursor : null;
             setSearchStatus(hashtag ? `Résultats pour les mots-clés contenant "${hashtag}"` : "");
-            renderGallery(photos, hashtag
-                ? "Aucune photo ne correspond à ce hashtag."
-                : "Aucun montage pour le moment.");
-            pageStatus.textContent = pagination.total === 0 ? "Aucune photo" :
-                `Page ${currentPage} sur ${totalPages} · ${pagination.total} photo${pagination.total > 1 ? "s" : ""}`;
+            pageStatus.textContent = galleryPhotos.length === 0 ? "Aucune photo" :
+                `${galleryPhotos.length} photo${galleryPhotos.length > 1 ? "s" : ""} affichée${galleryPhotos.length > 1 ? "s" : ""}${hasMore ? "" : " · Vous avez tout vu"}`;
             const url = new URL(window.location.href);
             url.searchParams.set("page", "gallery");
-            url.searchParams.set("gallery_page", currentPage);
+            url.searchParams.delete("gallery_page");
             if (hashtag) url.searchParams.set("hashtag", hashtag);
             else url.searchParams.delete("hashtag");
             window.history.replaceState({ page: "gallery" }, "", url);
         } catch (error) {
-            if (version !== requestVersion || !container.isConnected) return;
-            setSearchStatus("Impossible de charger cette page. Réessayez.");
+            if (version !== requestVersion || disposed || !container.isConnected) return;
+            setSearchStatus("Impossible de charger les photos. Réessayez.");
             retry.hidden = false;
-            if (galleryPhotos.length === 0) {
-                setEmpty("Impossible de charger la galerie.");
-                pageStatus.textContent = "Page indisponible";
-            }
+            pageStatus.textContent = "Chargement interrompu";
+            if (galleryPhotos.length === 0) setEmpty("Impossible de charger la galerie.");
         } finally {
-            if (version === requestVersion && container.isConnected) {
+            if (version === requestVersion && !disposed && container.isConnected) {
+                loading = false;
                 container.setAttribute("aria-busy", "false");
-                previousPage.disabled = currentPage <= 1;
-                nextPage.disabled = currentPage >= totalPages;
+                nextPage.disabled = !hasMore;
+                nextPage.hidden = !hasMore || !retry.hidden;
+                // Re-observe to fill a large viewport even if the sentinel remains visible.
+                if (hasMore && retry.hidden) observer?.observe(sentinel);
             }
         }
     };
-    previousPage.addEventListener("click", () => loadGallery(activeHashtag, currentPage - 1));
-    nextPage.addEventListener("click", () => loadGallery(activeHashtag, currentPage + 1));
+    if ("IntersectionObserver" in window) {
+        observer = new IntersectionObserver(entries => {
+            if (entries.some(entry => entry.isIntersecting) && retry.hidden) loadGallery(activeHashtag, true);
+        }, { rootMargin: "300px" });
+    }
+    nextPage.addEventListener("click", () => loadGallery(activeHashtag, true));
     retry.addEventListener("click", () => loadGallery(...lastRequest));
+
+    const dispose = () => {
+        disposed = true;
+        requestVersion++;
+        requestController?.abort();
+        observer?.disconnect();
+        closeViewer();
+        document.removeEventListener("keydown", onViewerKeydown);
+        window.removeEventListener("app:page-leave", dispose);
+        window.removeEventListener("pagehide", dispose);
+    };
+    window.addEventListener("app:page-leave", dispose);
+    window.addEventListener("pagehide", dispose);
 
     const loadHashtagSuggestions = async () => {
         try {
@@ -437,7 +491,6 @@ export function init() {
                 suggestions.appendChild(button);
             });
         } catch (error) {
-            console.error("[GALLERY] impossible de charger les mots-cles", error);
             suggestions.innerHTML = "";
         }
     };
@@ -476,7 +529,7 @@ export function init() {
         }
     });
 
-    document.addEventListener("keydown", (event) => {
+    const onViewerKeydown = (event) => {
         if (viewerModal.hidden) {
             return;
         }
@@ -488,14 +541,12 @@ export function init() {
         } else if (event.key === "ArrowRight") {
             showNextPhoto();
         }
-    });
+    };
+    document.addEventListener("keydown", onViewerKeydown);
 
     loadHashtagSuggestions();
     const initialParams = new URLSearchParams(window.location.search);
     let initialHashtag = "";
     try { initialHashtag = validateHashtag(initialParams.get("hashtag") || ""); } catch { /* Ignore invalid bookmarked filters. */ }
-    const initialPageValue = initialParams.get("gallery_page") || "1";
-    const initialPage = /^[1-9][0-9]*$/.test(initialPageValue) && Number(initialPageValue) <= 178956971
-        ? Number(initialPageValue) : 1;
-    loadGallery(initialHashtag, initialPage);
+    loadGallery(initialHashtag);
 }

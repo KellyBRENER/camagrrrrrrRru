@@ -10,21 +10,27 @@ services:
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - APP_URL=${APP_URL:-http://localhost:8081}
+      - APP_ALLOWED_ORIGINS=${APP_ALLOWED_ORIGINS:-}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   db:
-    image: mariadb:latest
+    image: mariadb:12.3.2
     restart: always
     volumes:
       - db_data:/var/lib/mysql
     environment:
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
-    ports:
-      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
 
 volumes:
   db_data:

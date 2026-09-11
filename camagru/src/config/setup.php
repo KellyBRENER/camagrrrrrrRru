@@ -1,9 +1,9 @@
 <?php
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 require_once __DIR__ . '/environment.php';
-[$host, $db, $user, $pass] = databaseSettings();
 
 try {
+    [$host, $db, $user, $pass] = databaseSettings();
     // Connexion SANS dbname
     $pdo = new PDO("mysql:host=$host;charset=utf8mb4", $user, $pass);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -16,6 +16,7 @@ try {
     }
 
     echo "DataBase initialisée avec succès.\n";
-} catch (PDOException $e) {
-    die("Erreur : " . $e->getMessage() . "\n");
+} catch (Throwable $e) {
+    fwrite(STDERR, "Impossible d’initialiser la base. Vérifiez sa disponibilité et la configuration locale.\n");
+    exit(1);
 }

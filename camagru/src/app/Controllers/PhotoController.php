@@ -48,17 +48,13 @@ class PhotoController {
             }
 
             $stickerIds = array_column($stickers, 'sticker_id');
-            $created = $this->photoModel->create((int) $_SESSION['user_id'], $hashtags, $stickerIds);
-
-            if (!$created) {
-                throw new RuntimeException('Impossible de creer la photo en base.');
-            }
-
+            $path = $this->photoModel->buildRelativePhotoPath((int) $_SESSION['user_id']);
+            // Complete the file before publishing its row. Composition holds no SQL lock.
+            $this->composer->compose($sourceImage, $crop, $frameId, $stickers, $path, $layers);
             try {
-                $this->composer->compose($sourceImage, $crop, $frameId, $stickers, $created['path'], $layers);
-            } catch (Exception $e) {
-                $this->deleteGeneratedFile($created['path']);
-                $this->photoModel->deleteByOwner((int) $created['photo_id'], (int) $_SESSION['user_id']);
+                $created = $this->photoModel->create((int) $_SESSION['user_id'], $hashtags, $stickerIds, $path);
+            } catch (Throwable $e) {
+                $this->deleteGeneratedFile($path);
                 throw $e;
             }
 
@@ -69,8 +65,7 @@ class PhotoController {
         } catch (InvalidArgumentException $e) {
             http_response_code(400);
             $this->jsonResponse(false, $e->getMessage());
-        } catch (Exception $e) {
-            error_log('Erreur creation montage photo : ' . $e->getMessage());
+        } catch (Throwable $e) {
             http_response_code(500);
             $this->jsonResponse(false, 'Impossible de creer le montage.');
         }
@@ -119,19 +114,18 @@ class PhotoController {
             $this->jsonResponse(false, 'Photo invalide.');
         }
 
-        $photo = $this->photoModel->getById($photoId);
-
-        if (!$photo || (int) $photo['user_id'] !== (int) $_SESSION['user_id']) {
+        try {
+            $deleted = $this->photoModel->deleteByOwner($photoId, (int) $_SESSION['user_id'],
+                fn($path) => $this->deleteGeneratedFile($path));
+        } catch (Throwable $e) {
+            http_response_code(500);
+            $this->jsonResponse(false, 'Impossible de supprimer la photo. Réessayez.');
+        }
+        if (!$deleted) {
             http_response_code(404);
             $this->jsonResponse(false, 'Photo introuvable.');
         }
 
-        if (!$this->photoModel->deleteByOwner($photoId, (int) $_SESSION['user_id'])) {
-            http_response_code(500);
-            $this->jsonResponse(false, 'Impossible de supprimer la photo.');
-        }
-
-        $this->deleteGeneratedFile($photo['path']);
         $this->jsonResponse(true, 'Photo supprimee.');
     }
 
@@ -151,6 +145,41 @@ class PhotoController {
             $this->jsonResponse(false, 'Hashtag invalide.');
         }
 
+        if (isset($_GET['cursor'])) {
+            Validation::integer($_GET['cursor'], 1, 1, 'Pagination');
+            $hasBeforeDate = isset($_GET['before_created_at']);
+            $hasBeforeId = isset($_GET['before_id']);
+            if ($hasBeforeDate !== $hasBeforeId) {
+                throw new InvalidArgumentException('Curseur incomplet.');
+            }
+            $beforeCreatedAt = $hasBeforeDate
+                ? $this->validateCursorDate($_GET['before_created_at']) : null;
+            $beforeId = isset($_GET['before_id'])
+                ? Validation::integer($_GET['before_id'], 1, 2147483647, 'Curseur') : null;
+            $photos = $this->photoModel->getPublicPhotoBatch(
+                $limit + 1,
+                $beforeCreatedAt,
+                $beforeId,
+                $hashtag,
+                $viewerId
+            );
+            $hasMore = count($photos) > $limit;
+            $photos = array_slice($photos, 0, $limit);
+            $lastPhoto = $photos ? $photos[count($photos) - 1] : null;
+            $this->jsonResponse(true, null, [
+                'is_logged_in' => isset($_SESSION['user_id']),
+                'hashtag' => $hashtag === '' ? null : mb_strtolower($hashtag, 'UTF-8'),
+                'pagination' => [
+                    'has_more' => $hasMore,
+                    'next_cursor' => $hasMore ? [
+                        'created_at' => $lastPhoto['created_at'],
+                        'photo_id' => (int) $lastPhoto['photo_id']
+                    ] : null
+                ],
+                'photos' => array_map([$this, 'serializePhoto'], $photos)
+            ]);
+        }
+
         $total = $this->photoModel->countPublicPhotos($hashtag);
         // A bookmarked page can disappear after photos are deleted.
         if ($offset >= $total) {
@@ -168,6 +197,17 @@ class PhotoController {
             'pagination' => ['total' => $total, 'limit' => $limit, 'offset' => $offset],
             'photos' => array_map([$this, 'serializePhoto'], $photos)
         ]);
+    }
+
+    private function validateCursorDate($value) {
+        $value = Validation::text($value, 19, 'Date du curseur');
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value);
+        $errors = DateTimeImmutable::getLastErrors();
+        if (!$date || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+            || $date->format('Y-m-d H:i:s') !== $value) {
+            throw new InvalidArgumentException('Date du curseur invalide.');
+        }
+        return $value;
     }
 
     public function hashtagList() {
@@ -202,29 +242,14 @@ class PhotoController {
         $payload = $this->readPayload();
         $photoId = Validation::integer($payload['photo_id'] ?? $payload['photoId'] ?? null, 1, 2147483647, 'Photo');
 
-        if ($photoId <= 0 || !$this->photoModel->getById($photoId)) {
+        $userId = (int) $_SESSION['user_id'];
+        $result = $this->photoModel->toggleLike($photoId, $userId);
+        if ($result === null) {
             http_response_code(404);
             $this->jsonResponse(false, 'Photo introuvable.');
         }
-
-        $userId = (int) $_SESSION['user_id'];
-        $liked = $this->photoModel->isLikedByUser($photoId, $userId);
-
-        if ($liked) {
-            $this->photoModel->unlike($photoId, $userId);
-            $liked = false;
-        } else {
-            if ($this->photoModel->like($photoId, $userId)) {
-                $this->notifications->send($photoId, $userId);
-            }
-            $liked = true;
-        }
-
-        $this->jsonResponse(true, null, [
-            'photo_id' => $photoId,
-            'liked_by_user' => $liked,
-            'likes_count' => $this->photoModel->countLikes($photoId)
-        ]);
+        if ($result['liked_by_user']) $this->notifications->send($photoId, $userId);
+        $this->jsonResponse(true, null, array_merge(['photo_id' => $photoId], $result));
     }
 
     public function comments() {
@@ -278,8 +303,8 @@ class PhotoController {
         }
 
         if (!$this->photoModel->addComment($photoId, (int) $_SESSION['user_id'], $comment)) {
-            http_response_code(500);
-            $this->jsonResponse(false, 'Impossible d ajouter le commentaire.');
+            http_response_code(404);
+            $this->jsonResponse(false, 'Photo introuvable.');
         }
 
         $this->notifications->send($photoId, (int) $_SESSION['user_id'], $comment);
@@ -511,14 +536,16 @@ class PhotoController {
     private function deleteGeneratedFile($relativePath) {
         $relativePath = ltrim((string) $relativePath, '/');
 
-        if (!preg_match('#^uploads/photos/[0-9]+/[0-9]+\.png$#', $relativePath)) {
+        if (!preg_match('#^uploads/photos/[0-9]+/(?:[0-9]+|[a-f0-9]{32})\.png$#', $relativePath)) {
             return;
         }
 
         $path = __DIR__ . '/../../public/' . $relativePath;
 
         if (is_file($path)) {
-            unlink($path);
+            if (!@unlink($path) && file_exists($path)) {
+                throw new RuntimeException('Impossible de supprimer le fichier photo.');
+            }
         }
     }
 

@@ -55,8 +55,21 @@ class PhotoComposer {
             $absoluteOutputPath = $this->resolveOutputPath($relativeOutputPath);
             $this->ensureOutputDirectory(dirname($absoluteOutputPath));
 
-            if (!imagepng($canvas, $absoluteOutputPath)) {
-                throw new RuntimeException('Impossible d\'ecrire le fichier final.');
+            // Exclusive creation is atomic, including when the proposed path already exists.
+            $output = @fopen($absoluteOutputPath, 'xb');
+            if ($output === false) throw new RuntimeException('Impossible de creer un nouveau fichier photo.');
+            try {
+                if (!imagepng($canvas, $output) || !fflush($output) || fstat($output)['size'] === 0) {
+                    throw new RuntimeException('Impossible d ecrire le fichier final.');
+                }
+            } catch (Throwable $e) {
+                fclose($output);
+                @unlink($absoluteOutputPath);
+                throw $e;
+            }
+            if (!fclose($output)) {
+                @unlink($absoluteOutputPath);
+                throw new RuntimeException('Impossible de fermer le fichier photo.');
             }
 
             return true;
@@ -340,7 +353,7 @@ class PhotoComposer {
     private function resolveOutputPath($relativeOutputPath) {
         $relativeOutputPath = ltrim((string) $relativeOutputPath, '/');
 
-        if (!preg_match('#^uploads/photos/[0-9]+/[0-9]+\.png$#', $relativeOutputPath)) {
+        if (!preg_match('#^uploads/photos/[0-9]+/(?:[0-9]+|[a-f0-9]{32})\.png$#', $relativeOutputPath)) {
             throw new InvalidArgumentException('Chemin de sortie invalide.');
         }
 
@@ -352,7 +365,7 @@ class PhotoComposer {
             return;
         }
 
-        if (!mkdir($directory, 0775, true) && !is_dir($directory)) {
+        if (!@mkdir($directory, 0775, true) && !is_dir($directory)) {
             throw new RuntimeException('Impossible de creer le dossier photo.');
         }
     }

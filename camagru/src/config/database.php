@@ -9,6 +9,5 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
     ]);
 } catch (PDOException $e) {
-    die("Erreur de connexion : " . $e->getMessage());
+    throw new RuntimeException('Service temporairement indisponible.', 0, $e);
 }
-

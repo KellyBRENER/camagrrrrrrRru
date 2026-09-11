@@ -1,948 +1,309 @@
-# Camagru - document de reference du depot
-
-Derniere analyse : 2026-08-06.
-
-Ce document sert de repere pour les prochains prompts. Avant de modifier le projet,
-relire au moins les sections "Carte rapide", "Ou modifier quoi" et "Regles absolues du
-sujet".
-
-Source sujet : `camagru.pdf`, version 4.1.
-
-### Mise à jour sécurité et réinitialisation — 2026-09-08
-
-Cette section remplace les anciens constats de sécurité et d'absence de
-réinitialisation plus bas dans ce document.
-
-- Protection CSRF centralisée pour tous les POST, formulaires classiques et appels JSON.
-- Validation email : GET affiche une confirmation ; seul le POST protégé active le compte.
-  La consommation du token est atomique, pour éviter les doubles validations.
-- Déconnexion en POST, toujours en un clic ; cookies HttpOnly/SameSite et renouvellement
-  de session à la connexion. Les sessions antérieures à un changement de mot de passe
-  sont invalidées à leur prochaine requête.
-- Pseudo encodé avec `json_encode` dans le JavaScript ; validation serveur du pseudo,
-  de la longueur de l'email et des mots de passe. Upload limité aux contenus PNG/JPEG.
-- Identifiants DB lus dans l'environnement fourni par `.env` ; liens email fondés sur
-  `APP_URL`, jamais sur le header `Host` envoyé par le client.
-- Routes `forgot_password` et `reset_password`, vues dédiées et lien depuis la connexion.
-- Table `password_resets` : hash SHA-256 du token aléatoire, durée 30 minutes, usage unique,
-  renouvellement limité à une demande par minute et par compte activé.
-- `make migrate` ajoute la table sans reset ; `make setup` applique aussi les migrations.
-- `make test-security` teste le parcours HTTP avec une base temporaire et capture les
-  mails localement. L'acheminement réel par SMTP reste à vérifier avec sa propre adresse.
-- Le nettoyage des erreurs et logs est volontairement reporté. Les secrets éventuellement
-  présents dans l'historique Git ne sont pas purgés par ces modifications ; les anciennes
-  sauvegardes déjà suivies par Git ne sont pas retirées automatiquement.
-
-Fichiers ajoutés : `app/Core/Security.php`, `config/environment.php`, `config/migrate.php`,
-`database/migrations/001_password_resets.sql`, les vues forgot/reset et `tests/security.php`
-(sous `camagru/src/`). Configuration exemple : `camagru/.env.example`.
-
-
-
-## 1. Resume du projet
-
-Camagru est une application web de photo/montage.
-
-Objectif du sujet :
-
-- permettre a un utilisateur de creer un compte ;
-- confirmer ce compte par un lien unique envoye par email ;
-- se connecter / se deconnecter ;
-- acceder a un studio prive ;
-- choisir une image superposable avec canal alpha ;
-- capturer une photo webcam ou uploader une image ;
-- generer l'image finale cote serveur ;
-- rendre les images publiques, likables et commentables.
-
-Etat actuel du depot :
-
-- architecture PHP maison proche MVC ;
-- routage centralise par `Router.php` et `routes.php` ;
-- session PHP classique ;
-- inscription, validation email, login, logout et renvoi de lien de validation presents ;
-- studio prive avec webcam, upload image, recadrage, filtres cadres/stickers en apercu navigateur ;
-- cadres fixes et stickers deplacables/redimensionnables ;
-- galerie, profil, stockage des creations, likes/commentaires et generation serveur finale encore a construire.
-
-
-## 2. Carte rapide du depot
-
-Racine :
-
-- `camagru.pdf` : sujet officiel a respecter.
-- `document.md` : ce document de reference.
-- `register.txt` : documentation detaillee du parcours inscription / validation / connexion.
-- `readme.md` : notes rapides pour consulter la DB.
-
-Application :
-
-- `camagru/docker-compose.yml` : services Docker `app` et `db`.
-- `camagru/Makefile` : commandes pratiques Docker et DB.
-- `camagru/docker/php/Dockerfile` : image PHP 8.2 Apache, GD, PDO MySQL, msmtp, SSL local.
-- `camagru/docker/php/custom.ini` : config PHP, logs, uploads, mail.
-- `camagru/docker/php/msmtprc.template` : configuration SMTP.
-- `camagru/docker/php/default-ssl.conf` : VirtualHost HTTPS local.
-
-Backend PHP :
-
-- `camagru/src/public/index.php` : point d'entree HTTP.
-- `camagru/src/public/logout.php` : destruction de session.
-- `camagru/src/config/routes.php` : table de routage.
-- `camagru/src/config/database.php` : connexion PDO a MariaDB.
-- `camagru/src/config/setup.php` : initialise la base avec `init.sql`.
-- `camagru/src/config/dropdb.php` : supprime la base.
-- `camagru/src/database/init.sql` : schema SQL actuel.
-- `camagru/src/app/Core/Router.php` : routeur PHP.
-- `camagru/src/app/Controllers/AuthController.php` : auth, inscription, verification, renvoi, login, studio.
-- `camagru/src/app/Controllers/PhotoController.php` : endpoint prive de creation du montage photo.
-- `camagru/src/app/Controllers/PageController.php` : pages publiques simples.
-- `camagru/src/app/Models/UserModel.php` : acces table `users`.
-- `camagru/src/app/Models/PhotoModel.php` : acces backend photos, likes, commentaires, hashtags.
-- `camagru/src/app/Services/PhotoComposer.php` : generation GD du PNG final cote serveur.
-
-Vues PHP :
-
-- `camagru/src/app/Views/layout.php` : squelette HTML, header, footer, JS principal.
-- `camagru/src/app/Views/header.php` : barre haute, login/logout.
-- `camagru/src/app/Views/footer.php` : navigation basse.
-- `camagru/src/app/Views/home.php` : accueil.
-- `camagru/src/app/Views/register.php` : formulaire inscription.
-- `camagru/src/app/Views/registerinprogress.php` : compte cree, mail envoye.
-- `camagru/src/app/Views/verify_success.php` : compte valide.
-- `camagru/src/app/Views/verify_failed.php` : lien invalide/deja utilise.
-- `camagru/src/app/Views/resend_validation.php` : renvoi lien de validation.
-- `camagru/src/app/Views/login.php` : formulaire login.
-- `camagru/src/app/Views/studio.php` : studio webcam/upload/filtres.
-- `camagru/src/app/Views/gallery.php` : squelette galerie.
-- `camagru/src/app/Views/profil.php` : squelette profil.
-
-Frontend :
-
-- `camagru/src/public/js/app.js` : responsive shell + interception liens `data-page`.
-- `camagru/src/public/js/router.js` : navigation AJAX, chargement des scripts de page.
-- `camagru/src/public/js/pages/register.js` : validation et POST AJAX inscription.
-- `camagru/src/public/js/pages/login.js` : POST AJAX login.
-- `camagru/src/public/js/pages/studio.js` : camera, upload, crop, filtres, stickers.
-- `camagru/src/public/js/pages/home.js`, `gallery.js`, `profil.js` : actuellement vides.
-- `camagru/src/public/css/style.css` : tout le theme et l'interface.
-
-Assets :
-
-- `camagru/src/public/images/leopard.jpg` : texture header/footer.
-- `camagru/src/public/images/favicon.png` : favicon.
-- `camagru/src/public/images/filters/filters.json` : manifeste des filtres.
-- `camagru/src/public/images/filters/leopard-frame.png` : cadre PNG transparent.
-- `camagru/src/public/images/filters/leopard-sticker.png` : sticker PNG transparent.
-- `camagru/src/public/uploads/photos/` : dossier prevu pour les images finales generees.
-
-
-## 3. Fonctionnement global des requetes
-
-1. Toute requete applicative arrive sur `src/public/index.php`.
-2. `index.php` demarre la session PHP.
-3. Il charge `database.php`, `Router.php` et `routes.php`.
-4. Il lit `$_GET['page']`, par defaut `home`.
-5. Il detecte l'etat connecte avec `$_SESSION['user_id']`.
-6. Il appelle `Router->handleRequest($page, $isLoggedIn)`.
-7. `Router.php` :
-   - verifie si la route existe ;
-   - redirige vers `home` si la route est inconnue ;
-   - bloque les pages privees si l'utilisateur n'est pas connecte ;
-   - instancie le controleur ;
-   - appelle la methode ;
-   - recupere le nom de vue ;
-   - renvoie soit la vue seule en AJAX, soit `layout.php`.
-
-Important :
-
-- Les pages AJAX sont chargees avec l'en-tete `X-Requested-With: XMLHttpRequest`.
-- `layout.php` n'est charge que pour les requetes completes.
-- Les scripts de page sont charges dynamiquement par `router.js`.
-- Pour ajouter une page, il faut en general modifier :
-  - `src/config/routes.php`
-  - un controleur
-  - une vue dans `src/app/Views/`
-  - eventuellement `src/public/js/router.js` si un script de page est necessaire.
-
-
-## 4. Authentification et comptes
-
-Fichiers principaux :
-
-- `src/app/Controllers/AuthController.php`
-- `src/app/Models/UserModel.php`
-- `src/app/Views/register.php`
-- `src/app/Views/login.php`
-- `src/app/Views/resend_validation.php`
-- `src/public/js/pages/register.js`
-- `src/public/js/pages/login.js`
-- `src/database/init.sql`
-
-Table actuelle :
-
-```sql
-users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    is_verified BOOLEAN DEFAULT FALSE,
-    token VARCHAR(255) NULL
-)
-```
-
-Tables backend photos ajoutees :
-
-```sql
-photos (
-    photo_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    path VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP
-)
-
-stickers (
-    sticker_id VARCHAR(50) PRIMARY KEY,
-    path VARCHAR(255) NOT NULL,
-    width INT NOT NULL,
-    height INT NOT NULL,
-    hashtag VARCHAR(25),
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP
-)
-
-photo_likes (
-    photo_id INT NOT NULL,
-    user_id INT NOT NULL,
-    created_at TIMESTAMP,
-    PRIMARY KEY (photo_id, user_id)
-)
-
-comments (
-    comment_id INT AUTO_INCREMENT PRIMARY KEY,
-    photo_id INT NOT NULL,
-    user_id INT NOT NULL,
-    comment VARCHAR(500) NOT NULL,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP
-)
-
-hashtags (
-    hashtag_id INT AUTO_INCREMENT PRIMARY KEY,
-    hashtag VARCHAR(25) NOT NULL UNIQUE,
-    created_at TIMESTAMP
-)
-
-photo_hashtags (
-    photo_id INT NOT NULL,
-    hashtag_id INT NOT NULL,
-    created_at TIMESTAMP,
-    PRIMARY KEY (photo_id, hashtag_id)
-)
-```
-
-Relations importantes :
-
-- `photos.user_id` pointe vers `users.id`.
-- `photo_likes.photo_id`, `comments.photo_id`, `photo_hashtags.photo_id` pointent vers `photos.photo_id`.
-- Suppression d'une photo : suppression automatique des likes, commentaires et liens hashtags avec `ON DELETE CASCADE`.
-- Suppression d'un user : suppression automatique de ses photos, likes et commentaires.
-- La suppression d'une photo cote app passe par `POST /?page=photo_delete`, verifie que le user connecte est proprietaire, supprime la ligne DB puis le PNG genere.
-- Pour les hashtags, ne pas stocker une liste de photos dans une colonne : utiliser `hashtags` + `photo_hashtags`.
-- Chemin final attendu pour une photo : `uploads/photos/{user_id}/{photo_id}.png`.
-- Le serveur doit generer la photo finale en PNG, meme si l'image client source est PNG, JPEG ou autre format accepte.
-- Les donnees de crop et de placement sticker sont temporaires : elles servent uniquement a generer le montage final cote serveur.
-- Ne pas stocker la position, taille ou rotation des stickers dans la base apres generation.
-- La table `stickers` sert de catalogue serveur : validation des stickers actifs, chemin source et hashtag par defaut.
-- A la creation d'une photo, stocker les hashtags envoyes par l'utilisateur, 5 maximum, plus les hashtags par defaut des stickers utilises.
-
-Inscription :
-
-- formulaire `register.php` ;
-- validation navigateur dans `register.js` ;
-- POST AJAX vers `/?page=register` ;
-- validation serveur dans `AuthController::register()` ;
-- hash du mot de passe avec `password_hash()` ;
-- creation utilisateur via `UserModel::create()` ;
-- token aleatoire avec `random_bytes(32)` ;
-- email de validation via `mail()` et msmtp.
-
-Validation :
-
-- lien : `/?page=verify&token=...` ;
-- `AuthController::verify()` en GET vérifie le token sans modifier la base et affiche un bouton de confirmation ;
-- le formulaire envoie le token email et le token CSRF en POST vers `/?page=verify` ;
-- après validation CSRF centralisée, `UserModel::confirmAccount()` active le compte et consomme le token par un UPDATE atomique ;
-- un lien déjà utilisé ne peut pas être réutilisé.
-
-Connexion :
-
-- formulaire `login.php` ;
-- POST AJAX via `login.js` ;
-- `AuthController::login()` cherche par username ;
-- verifie `password_verify()` et `is_verified` ;
-- remplit `$_SESSION['user_id']` et `$_SESSION['username']`.
-
-Renvoi du lien :
-
-- page `resend_validation.php` ;
-- route `resend_validation` ;
-- cherche le compte par email ;
-- refuse si deja verifie ;
-- genere un nouveau token ;
-- remplace le token en base ;
-- renvoie un email.
-
-Logout :
-
-- `src/public/logout.php` ;
-- `session_unset()`, `session_destroy()`, redirection home.
-
-Attention sujet :
-
-- Le mail de reinitialisation est implemente ; voir la mise a jour du 2026-09-08.
-- La modification username/email/password depuis le profil est implémentée (voir section 7).
-- Le sujet ne demande pas d'interdire les connexions simultanees sur mobile + ordinateur.
-
-
-## 5. Studio, filtres et images
-
-Fichiers principaux :
-
-- `src/app/Views/studio.php`
-- `src/public/js/pages/studio.js`
-- `src/public/css/style.css`
-- `src/public/images/filters/filters.json`
-- `src/public/images/filters/frames/*.png`
-- `src/public/images/filters/stickers/*.png`
-
-Acces :
-
-- route `studio` ;
-- controleur `AuthController::studio()` ;
-- route privee (`public => false`) ;
-- non connecte : redirection login ou 403 AJAX.
-
-Apercu :
-
-- `#cameraPreview` est un carre CSS (`aspect-ratio: 1 / 1`).
-- Toute la chaine studio doit rester carree : preview webcam, capture webcam, recadrage upload, montage final et visionneuse de montage.
-- La webcam est dans `<video id="webcam">`.
-- Le canvas technique est `<canvas id="overlay">`.
-- Les images capturees/upload recadrees sont affichees avec `#capturedPhotoPreview`.
-
-Camera :
-
-- demarrage via `navigator.mediaDevices.getUserMedia()`.
-- fallback legacy `getUserMedia`.
-- `window.currentStream` sert a couper la camera lors du changement de page AJAX.
-
-Upload et recadrage :
-
-- bouton upload ouvre `<input type="file" id="uploadPhoto">`.
-- accepte uniquement PNG/JPEG cote front.
-- ouvre une modale de crop carree.
-- crop avec drag + zoom.
-- export du crop depuis les pixels source pour eviter une perte de qualite inutile.
-
-Filtres :
-
-- charges depuis `/images/filters/filters.json`.
-- fichiers cadres dans `public/images/filters/frames/`.
-- fichiers stickers dans `public/images/filters/stickers/`.
-- deux types :
-  - `frame` : cadre fixe, plein format, non modifiable ;
-  - `sticker` : image transparente deplacable et redimensionnable.
-- l'interface separe les cadres et les stickers.
-- Stickers chats disponibles : `black-cat-sticker`, `angry-cat-sticker`, `scared-kitten-sticker`, `meowing-cat-sticker`, tous en PNG avec canal alpha.
-- le bouton capture devient disponible des que la camera est active, meme sans filtre selectionne.
-
-Manifest actuel :
-
-```json
-[
-  {
-    "id": "leopard-frame",
-    "name": "Cadre leopard",
-    "file": "/images/filters/frames/leopard-frame.png",
-    "type": "frame"
-  },
-  {
-    "id": "leopard-sticker",
-    "name": "Leopard",
-    "file": "/images/filters/stickers/leopard-sticker.png",
-    "type": "sticker"
-  }
-]
-```
-
-Important sujet :
-
-- Les images superposables doivent avoir un canal alpha.
-- Le rendu live navigateur est un bonus utile, mais la creation finale doit etre faite cote serveur.
-- Actuellement, l'aperçu existe cote navigateur et le backend de generation/sauvegarde est prepare via `PhotoController.php` + `PhotoComposer.php`.
-
-Pour ajouter un filtre :
-
-1. Mettre un PNG transparent dans `src/public/images/filters/frames/` pour un cadre ou `src/public/images/filters/stickers/` pour un sticker.
-2. Ajouter une entree dans `filters.json`.
-3. Choisir `type: "frame"` pour un cadre fixe plein format.
-4. Choisir `type: "sticker"` pour un element modifiable.
-
-
-## 6. Galerie et creations
-
-Mis à jour le 2026-09-08.
-
-- Galerie publique : affichage des montages de tous les utilisateurs, likes et commentaires
-  réservés aux utilisateurs connectés, notifications email selon leur préférence.
-- `gallery.php` et `gallery.js` : pagination AJAX de 12 photos avec boutons précédente/
-  suivante, état courant et total. Le filtre hashtag est conservé entre les pages.
-- Une nouvelle recherche ou « Tout afficher » revient à la première page. Page et filtre
-  sont conservés dans `?page=gallery&gallery_page=2&hashtag=chat`, via replaceState, pour
-  permettre rechargement et partage. Les boutons de pagination assurent la navigation ;
-  les changements de page n'ajoutent pas d'entrée à l'historique navigateur.
-- `PhotoController::publicList` renvoie `pagination: {total, limit, offset}` en plus des
-  photos. `PhotoModel::countPublicPhotos` compte les photos filtrées une seule fois même
-  si plusieurs hashtags de la même photo correspondent à la recherche partielle.
-- Tri par created_at DESC puis photo_id DESC pour départager les dates identiques.
-- Une page hors limites revient à la dernière page existante (notamment après suppression).
-- Les contrôles sont désactivés pendant le chargement ; une réponse ancienne ne remplace
-  pas une recherche plus récente. En cas d'erreur, la page courante est conservée et un
-  bouton Réessayer permet de renouveler la requête.
-- La visionneuse parcourt les photos de la page actuellement affichée.
-- Tests : `tests/pagination_cases.php` (HTTP/BDD, dans security.php),
-  `tests/pagination-dom.html` (Chrome, accessible sur /pagination via xss-server.cjs).
-  Résultats : suite serveur 268 contrôles réussis, pagination DOM et régression XSS PASS.
-- La pagination infinie reste un bonus optionnel non implémenté.
-
-
-## 7. Profil
-
-Mis à jour le 2026-09-08.
-
-- `GET /?page=profil` : page privée, préremplie avec les données de l'utilisateur connecté.
-- `POST /?page=profile_update` : modification du pseudo et de l'email, mot de passe actuel requis.
-- `POST /?page=password_update` : ancien mot de passe, nouveau mot de passe et confirmation.
-- Le contrôleur `AuthController` valide les types, longueurs et formats ; `UserModel::updateAccount`
-  effectue la modification en transaction, vérifie le mot de passe sous verrou et gère les doublons.
-- L'identifiant utilisateur vient exclusivement de la session, jamais du formulaire.
-- `profil.php` échappe les valeurs préremplies ; les deux formulaires incluent un jeton CSRF.
-- `profil.js` envoie les formulaires par AJAX et affiche les erreurs avec textContent. Après un
-  succès, rechargement du profil pour actualiser le header, la configuration et les jetons CSRF.
-  Sans JS, POST puis redirection 303 et message de session assurent le même parcours.
-- Le changement de mot de passe renouvelle la session courante et invalide les autres sessions
-  à leur prochaine requête via password_version. Les anciens liens de reset sont supprimés.
-- Le changement d'email annule les anciens liens de reset ; pas de revalidation email ajoutée.
-- Le profil propose un bouton activer/désactiver les emails pour commentaires et likes.
-  `POST /?page=notifications_update`, privé et protégé CSRF, enregistre la préférence
-  `users.email_notifications` (valeur 0/1). Elle est activée par défaut pour tous les comptes.
-- `PhotoNotifications::send` utilise mail()/msmtp après sauvegarde du commentaire ou
-  insertion effective du like. Aucun email au retrait d'un like ; un échec SMTP ne modifie
-  pas l'action enregistrée. La migration 002 ajoute la préférence sans effacer les données.
-- Vérification des notifications : capture locale des messages, opt-out/opt-in et panne
-  d'envoi simulée ; livraison dans une boîte réelle à vérifier avec la configuration SMTP.
-- Tests : `tests/profile_cases.php` et `tests/notification_cases.php`, inclus dans `tests/security.php` (253 contrôles au total).
-
-
-## 8. Docker, mail et base
-
-Lancement :
+# Camagru — documentation et contrôle du sujet
+
+Mise à jour : **9 septembre 2026**. Référence : [camagru.pdf](camagru.pdf), **version 4.1**. Les numéros de page ci-dessous sont ceux imprimés dans le sujet.
+
+Ce document décrit l’état du répertoire de travail, y compris les modifications non encore commitées. Il remplace les anciens constats contradictoires : le profil, les notifications, la composition serveur, la sauvegarde, la remise à zéro du studio et le défilement infini sont maintenant implémentés.
+
+**Verdict : les parcours fonctionnels principaux sont implémentés, mais la conformité intégrale n’est pas acquise.** Les traces de debug et le tri strict par date restent à traiter. Certains contrôles matériels, SMTP et de compatibilité restent à terminer. Les bonus ne sont évaluables que si le mandatory fonctionne intégralement, conformément au chapitre VI.
+
+## 1. Carte rapide
+
+Depuis la racine du dépôt :
+
+| Emplacement | Rôle |
+| --- | --- |
+| `readme.md` | Présentation et commandes de démarrage ; certains liens de documentation y utilisent encore les anciens chemins. |
+| `camagru/docs/camagru.pdf` | Sujet officiel 4.1. |
+| `camagru/docs/document.md` | État actuel, architecture, commandes, conformité et travaux avant rendu. |
+| `camagru/docs/audit-concurrence.md` | Garanties SQL/fichiers, concurrence, sessions et limites de reprise. |
+| `camagru/docs/audit-xss.md`, `validation-serveur.md` | Analyses complémentaires ; le code et les tests actuels priment sur leurs anciens résultats chiffrés. |
+| `camagru/docs/studio_reference.md`, `register.txt` | Notes détaillées historiques sur le studio et l’inscription. |
+| `camagru/docker-compose.yml` | Services `app` et `db`, ports et volume MariaDB. |
+| `camagru/docker/php/` | Image PHP/Apache, extensions GD/PDO/mbstring, msmtp et HTTPS local. |
+| `camagru/Makefile` | Démarrage, initialisation, migrations, tests et arrêt. |
+| `camagru/src/public/` | Seule racine publiée par Apache : entrée HTTP, JS, CSS, assets et montages. |
+| `camagru/src/app/` | Contrôleurs, modèles, services, vues et classes communes. |
+| `camagru/src/config/` | Routes, configuration environnement, connexion, setup et migrations. |
+| `camagru/src/database/` | Schéma initial et migrations. |
+| `camagru/src/tests/` | Tests PHP/HTTP/SQL, processus concurrents et tests DOM. |
+
+Les chemins `src/...`, `docker/...` et `docs/...` utilisés ensuite sont relatifs à `camagru/`.
+
+## 2. Architecture et règles de modification
+
+Le serveur utilise PHP avec PDO MySQL, GD, mbstring, les sessions et `mail()` via msmtp. MariaDB stocke les données dans InnoDB. Le navigateur utilise HTML, CSS et JavaScript natif, sans framework JS. Bootstrap CSS et Bootstrap Icons sont chargés depuis un CDN ; aucun bundle JavaScript Bootstrap n’est inclus.
+
+Le chemin habituel d’une requête est :
+
+1. `public/index.php` démarre la session et configure les en-têtes de sécurité.
+2. Tous les POST applicatifs passent par la vérification CSRF centralisée.
+3. `config/database.php` ouvre PDO ; `Security::validateSession()` revérifie le compte et la version de son mot de passe.
+4. `config/routes.php` et `app/Core/Router.php` choisissent le contrôleur et bloquent les routes privées sans connexion.
+5. Un contrôleur renvoie du JSON ou une vue PHP. Une requête AJAX de navigation reçoit la vue seule ; une navigation complète reçoit `layout.php`, avec header, main et footer.
+6. `public/js/router.js` charge les modules de page. Le routeur navigateur refuse d’insérer une réponse JSON comme du HTML.
+
+`public/logout.php` est une entrée distincte, limitée au POST avec CSRF. Les scripts de setup, migration et suppression de base sont réservés à la CLI. Une route inconnue revient actuellement à l’accueil, sans page 404 dédiée.
+
+| Modification | Fichiers principaux |
+| --- | --- |
+| Compte, profil, reset | `AuthController.php`, `UserModel.php`, `Core/Security.php`, vues associées et `js/pages/profil.js`. |
+| Validation d’entrées | `Core/Validation.php`, `Core/Security.php` et contrôleur du parcours. |
+| Studio et caméra | `Views/studio.php`, `js/pages/studio.js`, `js/router.js`, `css/style.css`. |
+| Composition et stockage | `PhotoController.php`, `PhotoModel.php`, `Services/PhotoComposer.php`, `js/image-paths.js`. |
+| Galerie et interactions | `Views/gallery.php`, `js/pages/gallery.js`, `PhotoController.php`, `PhotoModel.php`. |
+| Emails de notification | `Services/PhotoNotifications.php`, préférence utilisateur et configuration msmtp. |
+| Schéma | `database/init.sql`, migrations réexécutables dans `database/migrations/`. |
+| Navigation et adaptation écran | `Views/layout.php`, `header.php`, `footer.php`, `js/app.js`, `css/style.css`. |
+
+Règles à conserver : génération finale côté serveur ; pas de framework JS ; filtres PNG alpha ; identité et autorisations issues de la session ; validation côté serveur ; PDO préparé pour les données utilisateur ; encodage au moment de l’affichage ; aucune confiance dans un chemin fourni par le navigateur. Les pages privées doivent être déclarées `public => false`.
+
+## 3. Comptes, sécurité et sessions
+
+### Inscription et activation
+
+- Pseudo de 1 à 50 caractères : lettres/chiffres Unicode, `_`, `.` et `-`.
+- Email validé côté serveur, limité à 100 caractères ; pseudo et email sont uniques en base.
+- Mot de passe : au moins 8 caractères, une lettre ASCII et un chiffre, au plus 72 octets. Stockage par `password_hash()`, vérification par `password_verify()`.
+- Token d’activation généré avec `random_bytes(32)`. Le GET du lien email affiche une confirmation ; seul un POST avec CSRF consomme le token et active le compte par UPDATE atomique.
+- Le renvoi d’un lien remplace le token précédent. La connexion exige un compte activé.
+
+### Mot de passe oublié
+
+- Demande par email, réponse neutre pour les comptes absents, non activés ou limités en fréquence.
+- Token aléatoire de 32 octets, seul son SHA-256 est stocké dans `password_resets`.
+- Expiration après 30 minutes, usage unique, au plus une nouvelle demande par minute et par compte activé tant que sa demande existe.
+- Le secret du lien est retiré de l’URL avant l’affichage du formulaire. Nouveau mot de passe et confirmation sont contrôlés côté serveur.
+- Demande, consommation du reset et changement sensible de compte utilisent le même ordre de verrouillage : utilisateur puis reset. Une adresse devenue obsolète ne permet pas de créer un nouveau token envoyé à cette ancienne adresse.
+
+### Profil et révocation
+
+Le profil privé permet de modifier pseudo/email avec le mot de passe actuel, de changer le mot de passe et d’activer/désactiver les emails. Chaque formulaire transporte son CSRF. Les formulaires du profil fonctionnent aussi en POST classique avec redirection.
+
+Les valeurs originales du pseudo et de l’email accompagnent le formulaire. Sous verrou, le serveur applique uniquement les champs modifiés : deux changements indépendants ne s’écrasent pas. Deux modifications incompatibles du même champ produisent HTTP 409. Un doublon pseudo/email produit une erreur fonctionnelle 400.
+
+Un changement de mot de passe renouvelle la session courante et invalide les autres sessions à leur prochaine requête grâce à `password_version`, dérivée du hash stocké. Un reset déconnecte également les anciennes sessions. Les changements d’email ou de mot de passe invalident les anciens liens de reset. Le changement d’email est immédiat : il n’existe pas de second parcours de validation de nouvelle adresse, que le sujet ne demande pas.
+
+Les cookies sont HttpOnly et SameSite=Lax, et Secure sur HTTPS. La session est renouvelée à la connexion et lors d’une modification sensible. Les données personnelles ne doivent pas être stockées dans des logs de debug ou dans des dumps versionnés. Le dump local est désormais ignoré et absent des historiques local et distant réécrits.
+
+## 4. Studio et montage
+
+Le studio est privé. Il contient l’aperçu webcam, les cadres/stickers, les actions de capture/import/création et la bibliothèque personnelle avec miniatures, visionneuse et suppression.
+
+- **Capture désactivée sans sticker ou cadre sélectionné**, même si la caméra fonctionne. La présence d’une source vidéo exploitable est aussi nécessaire.
+- Caméra via `getUserMedia`, avec repli legacy ; un flux actif est réutilisé. La sortie du studio arrête les pistes. Un flux dont l’autorisation arrive après la sortie est immédiatement arrêté.
+- Import PNG/JPEG, contrôles de type/taille côté client puis validation réelle du contenu côté serveur. Limites métier : 10 Mio et 20 millions de pixels. Les plafonds PHP de requête s’ajoutent à ces limites.
+- Recadrage carré avec déplacement et zoom ; stickers déplaçables, redimensionnables et orientables ; un cadre maximum et dix stickers maximum.
+- Aperçu immédiat dans le navigateur. Le navigateur transmet l’image source recadrée et les paramètres ; **GD superpose les calques côté serveur** et produit un PNG de 1024 × 1024 pixels.
+- Après sauvegarde réussie : image source, cadre, stickers, mots-clés, upload et recadrage sont remis à zéro. Le flux vidéo reste visible s’il était actif.
+- La bibliothèque est rechargée depuis `photo_mine` et reçoit immédiatement les nouvelles créations. Seul leur propriétaire peut les supprimer.
+
+### Catalogue de filtres
+
+`public/images/filters/filters.json` contient actuellement **2 cadres et 9 stickers**. Le contrôle des en-têtes des 11 fichiers PNG confirme un canal alpha pour chacun.
+
+Pour ajouter un cadre : placer le PNG dans `public/images/filters/frames/` et l’inscrire au manifeste avec `type: "frame"`.
+
+Pour ajouter un sticker : placer le PNG dans `public/images/filters/stickers/`, l’inscrire au manifeste avec `type: "sticker"`, puis ajouter la même référence à la table `stickers` : identifiant, chemin relatif, dimensions et hashtag. Mettre à jour `init.sql` pour les nouvelles installations et prévoir une migration/upsert pour une base existante. Modifier uniquement le JSON ne suffit pas à rendre un sticker acceptable par le serveur.
+
+Les hashtags saisis sont limités à cinq, avec 25 caractères maximum par mot-clé, lettres Unicode et tirets internes uniquement. Les hashtags des stickers utilisés sont ajoutés automatiquement.
+
+### Stockage et concurrence
+
+Nouveaux chemins : `public/uploads/photos/{user_id}/{nom_aleatoire_32_hex}.png`, où le nom vient de `bin2hex(random_bytes(16))`. Les anciens chemins numériques restent acceptés.
+
+Le fichier est créé exclusivement avec `fopen(..., 'xb')`, sans possibilité d’écraser un fichier existant. La composition se termine avant publication de la photo en BDD. Photo et hashtags sont ensuite enregistrés en transaction ; un échec SQL déclenche le nettoyage du fichier. Les hashtags partagés utilisent un upsert atomique.
+
+La suppression exprime l’autorisation dans `DELETE ... WHERE photo_id = ? AND user_id = ? RETURNING path`. Une photo absente ou appartenant à un autre compte donne 404. Si le nettoyage disque échoue, les suppressions SQL et cascades sont annulées. Un fichier déjà absent n’est pas une erreur.
+
+Cela ne constitue pas une transaction distribuée disque/SQL : arrêt brutal, perte de connexion pendant COMMIT ou nettoyage impossible peuvent demander une réconciliation. Les limites précises et tests sont décrits dans [audit-concurrence.md](audit-concurrence.md).
+
+## 5. Galerie, interactions et notifications
+
+La galerie est publique. Elle affiche les créations de tous les utilisateurs. Les likes et commentaires sont réservés aux comptes connectés, avec contrôle serveur et CSRF.
+
+- Défilement infini : **lots de 5 photos**, ajoutés à la liste existante par IntersectionObserver. Un bouton de chargement manuel reste disponible.
+- Requête : `GET /?page=photo_public_list&cursor=1&limit=5`, puis ajout de `before_created_at` et `before_id` au lot suivant.
+- Réponse : `photos` et `pagination: {has_more, next_cursor: {created_at, photo_id}}`. Le filtre `hashtag` reste actif entre les lots.
+- Une nouvelle recherche annule la requête précédente et réinitialise les résultats. Les réponses obsolètes sont ignorées. Une erreur conserve les cartes déjà affichées et permet de réessayer.
+- La sortie de page annule le chargement et déconnecte l’observateur. La visionneuse parcourt toutes les photos déjà chargées.
+- L’URL conserve le filtre ; les anciens paramètres `gallery_page` sont retirés au profit du flux depuis son début.
+- L’API conserve également son ancien mode `limit/offset`, trié par `created_at DESC, photo_id DESC`, pour compatibilité.
+
+Le mode infini utilise `ORDER BY created_at DESC, photo_id DESC`. Son curseur composé compare d’abord la date, puis l’identifiant lorsque les dates sont identiques. Il reste valable si la ligne ayant fourni le curseur est supprimée entre deux lots.
+
+Les toggles de like sont sérialisés par verrou de la photo ; la PK `(photo_id, user_id)` empêche les doublons. Les commentaires restent protégés par une FK. Une photo supprimée pendant une interaction est traitée proprement sans créer de ligne orpheline.
+
+`PhotoNotifications::send()` envoie les emails après enregistrement d’un commentaire ou ajout effectif d’un like. Aucun email lors du retrait d’un like. `users.email_notifications` est **vrai par défaut**, y compris pour les comptes existants après migration 002, et modifiable dans le profil. Une panne SMTP ne défait pas l’interaction enregistrée. L’acheminement réel est à confirmer avant rendu ; les tests capturent uniquement les messages localement.
+
+## 6. Schéma et routes
+
+| Table | Rôle et principales garanties |
+| --- | --- |
+| `users` | PK `id`, UNIQUE pseudo/email, hash de mot de passe, activation, token, préférence email. |
+| `photos` | PK `photo_id`, propriétaire, chemin, date ; FK utilisateur avec cascade. |
+| `stickers` | Catalogue des stickers serveur et hashtags par défaut. |
+| `photo_likes` | PK `(photo_id, user_id)` ; FK photo et utilisateur avec cascade. |
+| `comments` | Texte limité à 500 caractères ; FK photo et utilisateur avec cascade. |
+| `hashtags` | Nom UNIQUE. |
+| `photo_hashtags` | PK composée ; FK vers photo/hashtag avec cascade. |
+| `password_resets` | PK utilisateur, token_hash UNIQUE, expiration et date de demande ; FK utilisateur avec cascade. |
+
+Les positions des calques ne sont pas conservées après composition. Les contraintes ont été vérifiées dans le schéma et dans MariaDB installé ; l’audit de concurrence n’a pas nécessité de migration supplémentaire.
+
+| Routes | Accès et usage |
+| --- | --- |
+| `home`, `gallery`, `registerinprogress` | Pages publiques. |
+| `register`, `login`, `resend_validation`, `verify`, `forgot_password`, `reset_password` | Parcours publics de compte, avec mutations limitées au POST protégé. |
+| `studio`, `profil` | Pages privées. |
+| `profile_update`, `password_update`, `notifications_update` | POST privés. |
+| `photo_create`, `photo_delete`, `photo_like_toggle`, `photo_comment_add` | POST privés. |
+| `photo_mine` | GET privé. |
+| `photo_public_list`, `photo_hashtag_list`, `photo_comments` | GET publics. |
+| `/logout.php` | POST avec CSRF, bouton accessible dans le header. |
+
+## 7. Installation et exploitation
+
+Prérequis : Docker, Docker Compose, Make et un fichier local `camagru/.env`. Copier `.env.example` et remplacer ses exemples par les paramètres locaux DB/SMTP. Ne pas publier les valeurs réelles.
+
+Depuis `camagru/`, la commande complète existante est :
 
 ```bash
-cd camagru
-docker compose up -d
+make start
 ```
 
-Arret :
+Elle lance Compose, attend dix secondes, prépare les permissions, initialise le schéma et les migrations, puis suit les logs. Le terminal reste donc occupé. Le lancement détaillé est `make up`, `make permissions`, `make setup`. Sur une installation existante, `make migrate` applique les migrations sans réinitialiser les données.
+
+| Élément | Configuration actuelle |
+| --- | --- |
+| Application | Image construite sur `php:8.2-apache`, bind mount `./src:/var/www/html`. |
+| Base | `mariadb:latest`, volume nommé Compose `db_data`, généralement `camagru_db_data`. |
+| HTTP | `http://localhost:8081`. |
+| HTTPS local | `https://localhost:8443`, certificat auto-signé généré à la construction. |
+| Base exposée | Port hôte 3306. |
+| Variables | `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `SMTP_USER`, `SMTP_PASS`, `APP_URL`. |
+| Migrations | `001_password_resets.sql`, `002_email_notifications.sql`, appliquées par setup/migrate. |
+
+`APP_URL` doit être l’adresse visible par le destinataire des emails ; les liens ne sont pas construits à partir du header client Host. La caméra fonctionne sur localhost ou une origine HTTPS acceptée. Une adresse LAN HTTP ne suffit généralement pas ; le certificat local n’est pas une configuration de production prête à publier.
+
+Limites d’exploitation à connaître : `make start` utilise une attente fixe sans healthcheck DB ; le premier démarrage sur volume vierge n’a pas été rejoué durant cet audit. `make permissions` donne actuellement des permissions 777 à l’arborescence d’uploads. Les tags d’images ne sont pas figés par digest. Ces points méritent un durcissement mais n’impliquent pas l’absence de conteneurisation.
+
+Commandes utiles :
 
 ```bash
-cd camagru
-docker compose down
+make ps
+make migrate
+make test-security
+make down
 ```
 
-Makefile :
+`make down` conserve le volume ; `make resetdb`, `make reset` et `make finaldown` sont destructifs. Les montages sur disque et la base doivent être sauvegardés/restaurés ensemble. Une cascade SQL sur un utilisateur ne supprime pas ses fichiers sur disque ; aucune route applicative de suppression de compte n’est actuellement proposée.
 
-- `make up` : lance Docker.
-- `make down` : arrete Docker.
-- `make setup` : initialise DB.
-- `make resetdb` : drop + setup.
-- `make logs` : logs.
-- `make shell` : shell app.
-
-Ports :
-
-- HTTP : `8081:80`.
-- HTTPS local : `8443:443`.
-- MariaDB : `3306:3306`.
-
-Mail :
-
-- PHP `mail()` passe par msmtp.
-- `custom.ini` configure `sendmail_path="/usr/bin/msmtp -t"`.
-- `msmtprc.template` utilise `SMTP_USER` et `SMTP_PASS`.
-- Ces variables viennent de `.env` via `docker-compose.yml`.
-
-Attention securite :
-
-- Le sujet dit que credentials/env/API keys doivent etre dans `.env` ignore par git.
-- Les scripts PHP lisent les identifiants DB depuis les variables injectees par Compose depuis `.env`.
-- Avant rendu final, il faudra nettoyer cela ou au minimum verifier les exigences d'evaluation.
-
-
-## 9. Regles absolues du sujet Camagru
-
-Ces points doivent guider toutes les futures modifications.
-
-### Regles techniques
-
-- Client autorise : HTML, CSS, JavaScript avec APIs natives du navigateur.
-- Pas de framework JS, pas de bibliotheque JS externe.
-- Framework CSS tolere seulement s'il n'ajoute pas de JS interdit.
-- Serveur : langage libre, mais limite a ce qui a un equivalent en librairie standard PHP.
-- Containerisation obligatoire : au moins un container deployable en une commande type docker-compose.
-- Compatible Firefox >= 41 et Chrome >= 46.
-- L'application ne doit produire aucune erreur, warning ou ligne de log console/server/client.
-- Exception toleree : erreurs `getUserMedia()` liees au manque de HTTPS.
-
-### Regles securite
-
-- Ne jamais stocker de mots de passe en clair ou non haches.
-- Protections HTML/JS : ne jamais injecter de contenu user non echappe.
-- Upload : refuser tout contenu indesirable.
-- SQL : utiliser requetes preparees, ne jamais concatener des entrees utilisateur dans SQL.
-- Ne pas permettre a un formulaire externe de manipuler des donnees privees.
-- Credentials/API/env : stocker localement dans `.env` ignore par git.
-- Penser CSRF/CORS/privacy : le sujet les cite comme notions importantes.
-
-### Regles utilisateur
-
-- Inscription avec email valide, username, password assez complexe.
-- Confirmation du compte par lien unique envoye par email.
-- Connexion par username + password.
-- Mot de passe oublie : l'utilisateur doit pouvoir demander un email de reinitialisation.
-- Deconnexion en un clic sur n'importe quelle page.
-- Utilisateur connecte : doit pouvoir modifier username, email, password.
-
-### Regles galerie
-
-- Galerie publique.
-- Affiche toutes les images editees de tous les utilisateurs.
-- Tri par date de creation.
-- Likes/commentaires seulement pour utilisateurs connectes.
-- Commentaire : notifier l'auteur par email.
-- Preference notification activee par defaut, desactivable.
-- Pagination obligatoire avec au moins 5 elements par page.
-
-### Regles studio/edition
-
-- Page studio accessible seulement aux utilisateurs authentifies.
-- Rejet poli des visiteurs non connectes.
-- Deux zones principales :
-  - section principale : preview webcam, liste images superposables, bouton capture ;
-  - section laterale : miniatures des photos precedentes de l'utilisateur.
-- Images superposables selectionnables.
-- Bouton capture inactif tant qu'aucune image superposable n'est selectionnee.
-- Images superposables avec canal alpha.
-- Creation finale de l'image cote serveur, y compris la superposition.
-- Upload image utilisateur obligatoire pour ceux qui n'ont pas de webcam.
-- Suppression : l'utilisateur peut supprimer ses propres images, jamais celles des autres.
-
-### Bonus
-
-Les bonus ne comptent que si la partie obligatoire est parfaite.
-
-Idees du sujet :
-
-- AJAXifier les echanges.
-- Live preview du resultat directement sur webcam.
-- Pagination infinie.
-- Partage social.
-- GIF anime.
-
-
-## 10. Ou modifier quoi
-
-Nouvelle route/page :
-
-- `src/config/routes.php`
-- controleur dans `src/app/Controllers/`
-- vue dans `src/app/Views/`
-- si navigation AJAX : ajouter le script dans `router.js` mapping `pageScripts`.
-
-Auth/login/register/verify/resend/password :
-
-- `src/app/Controllers/AuthController.php`
-- `src/app/Models/UserModel.php`
-- vues auth dans `src/app/Views/`
-- scripts `src/public/js/pages/login.js` ou `register.js`
-- schema `src/database/init.sql` si nouvelles colonnes.
-
-Profil :
-
-- `routes.php`
-- controleur auth ou nouveau controleur profil
-- `UserModel.php`
-- `profil.php`
-- `profil.js`
-- `init.sql`.
-
-Studio visuel :
-
-- `studio.php`
-- `studio.js`
-- `style.css`
-- `public/images/filters/filters.json`
-- `public/images/filters/frames/*.png`
-- `public/images/filters/stickers/*.png`.
-
-Generation image finale cote serveur :
-
-- route privee : `POST /?page=photo_create`.
-- controleur : `PhotoController.php`.
-- rendu image : `PhotoComposer.php`.
-- modele DB : `PhotoModel.php`.
-- utiliser PHP GD (`imagecreatefromstring`, `imagecreatefrompng`, `imagecopy`, `imagecopyresampled`, `imagepng`).
-- valider cote serveur l'id de filtre, ne jamais faire confiance au chemin envoye par client.
-- sauvegarder fichier final dans `src/public/uploads/photos/`.
-- creer le sous-dossier `src/public/uploads/photos/{user_id}/` avant d'ecrire le PNG.
-- enregistrer en base uniquement la photo finale, son chemin, son auteur et ses hashtags.
-- ordre obligatoire : creer l'entree DB pour obtenir `photo_id`, generer le PNG sous `uploads/photos/{user_id}/{photo_id}.png`, supprimer l'entree DB si le rendu ou l'ecriture fichier echoue.
-
-Donnees attendues pour la future creation serveur :
-
-- `image` ou `source_image` : image source utilisateur en data URL base64, base64 brut, ou fichier multipart `image`/`photo` ;
-- `frame_id` : id du cadre fixe, valide depuis `public/images/filters/filters.json` ;
-- donnees de crop en pourcentage ou coordonnees normalisees par rapport a l'image source ;
-- `stickers` : un ou plusieurs sticker ids, ou objets avec `sticker_id`, `center_x_percent`, `center_y_percent`, `width_percent`, `height_percent`, `rotation_degrees` ;
-- pour chaque sticker, donnees temporaires de rendu : taille, centre X/Y dans le cadre carre final et orientation ;
-- `hashtags` : hashtags utilisateur, 5 maximum ;
-- hashtags par defaut des stickers utilises, ajoutes automatiquement cote serveur.
-- formats image acceptes pour upload/source : PNG, JPEG ;
-- taille source maximum : 10 Mo ;
-- dimensions source maximum : 20 millions de pixels ;
-- sortie finale serveur : PNG 1024x1024.
-
-Branchement studio actuel :
-
-- bouton front : `Créer le montage sauvage` ;
-- fichier : `public/js/pages/studio.js` ;
-- la requete part vers `POST /?page=photo_create` en JSON ;
-- la route privee `GET /?page=photo_mine` recharge les montages du user dans `#myGallery` ;
-- le front ajoute la miniature retournee dans `#myGallery` apres succes ;
-- cliquer une miniature ouvre une visionneuse modale carree avec fermeture, clic hors modale, fleches precedent/suivant et navigation clavier gauche/droite ;
-- le front envoie l'image actuellement affichee dans l'apercu. Pour l'upload recadre, l'image envoyee est donc deja le resultat du recadrage navigateur actuel.
-- le front envoie `layers` pour conserver l'ordre des ajouts utilisateur ;
-- un seul cadre maximum est autorise ; cliquer de nouveau sur le cadre le retire ;
-- 10 stickers maximum sont autorises ;
-- chaque sticker affiche une croix de suppression dans son cadre ;
-- sur desktop, le cadre/les poignees/la croix d'un sticker sont invisibles hors survol ; sur tactile, le sticker actif garde les controles visibles ;
-- chaque sticker peut etre deplace, redimensionne et tourne ; le front envoie `rotation_degrees`, et `PhotoComposer.php` applique la rotation avec GD.
-- la creation bloque au-dela de 5 mots-cles utilisateur avec un message dans la modale ; les hashtags automatiques des stickers peuvent s'ajouter cote serveur.
-- les mots-cles utilisateur sont separes par virgules ou espaces, normalises en minuscules, et doivent contenir uniquement des lettres Unicode et des tirets internes ; pas de chiffre, underscore, `#`, espace interne, tiret au debut/a la fin, ni mot-cle de plus de 25 caracteres.
-- les miniatures de `#myGallery` ont une icone poubelle avec confirmation avant suppression ;
-- le backend valide les calques et les rend dans le meme ordre.
-
-Regle importante :
-
-- L'ecran du user ne doit jamais determiner la qualite ou le rendu final.
-- Le client peut afficher en CSS, mais les donnees envoyees au serveur doivent etre normalisees en pourcentage.
-- Le serveur reconstruit l'image finale en PNG dans la dimension imposee par le cadre.
-- Les donnees de crop et placement sticker ne sont pas persistantes : elles sont jetees apres generation du fichier final.
-
-Galerie :
-
-- `gallery.php`
-- `gallery.js`
-- nouveaux modeles images/likes/comments
-- routes API
-- `init.sql`.
-- route publique `GET /?page=photo_public_list` : liste les montages avec auteur, compteurs likes/commentaires et `liked_by_user` si le visiteur est connecte.
-- route publique `GET /?page=photo_public_list&hashtag=...` : filtre la galerie sur les hashtags contenant le terme valide recherche, du plus recent au plus ancien, avec le meme format que la liste publique.
-- route publique `GET /?page=photo_hashtag_list` : liste les hashtags existants en base pour les suggestions de recherche.
-- route publique `GET /?page=photo_comments&photo_id=...` : liste les commentaires d'une photo.
-- route privee `POST /?page=photo_like_toggle` : ajoute ou retire le like du user connecte.
-- route privee `POST /?page=photo_comment_add` : ajoute un commentaire de 500 caracteres maximum.
-- visiteurs non connectes : lecture galerie/commentaires OK, like/commentaire interdits.
-- cliquer une photo de la galerie ouvre une visionneuse modale carree avec fermeture, clic hors modale, fleches precedent/suivant et navigation clavier gauche/droite.
-- la galerie propose une recherche par hashtag : saisie puis Entree, suggestions cliquables, message vide specifique si aucune photo ne correspond, bouton pour revenir a l'affichage complet.
-
-CSS/layout :
-
-- `style.css`.
-- Attention mobile : verifier textes, boutons, cadres et preview carre.
-- Dans le studio, la taille de l'apercu ne doit pas etre fixee par breakpoint : le container central change selon le format, puis le carre d'apercu prend la plus grande taille possible dans ce container en reservant seulement les marges minimales et la colonne de boutons.
-- Dans ce container central, l'apercu reste carre, centre verticalement et pousse le plus a gauche possible ; les boutons de capture restent dans une colonne minimale le plus a droite possible.
-- Desktop : `body.app-shell` garde header/main/footer visibles avec le contenu central contraint.
-- Mobile tactile, portrait ou paysage : ne pas forcer header/footer fixes ; laisser la page scroller pour garder une experience utilisable avec la barre navigateur.
-- Studio mobile portrait : ordre vertical filtres -> apercu -> creations, avec scroll interne limite dans les panneaux filtres/creations.
-- Studio mobile paysage : garder une disposition en ligne si la largeur le permet ; sinon deux colonnes filtres + apercu, puis creations dessous, avec panneaux limites et scroll interne.
-
-Docker/mail/base :
-
-- `docker-compose.yml`
-- `docker/php/Dockerfile`
-- `docker/php/custom.ini`
-- `docker/php/msmtprc.template`
-- `config/database.php`
-- `config/setup.php`
-- `config/dropdb.php`.
-- `make start` lance les conteneurs, applique les permissions `public/uploads`, initialise la base, puis suit les logs Docker.
-
-
-## 11. Etat des exigences sujet
-
-Etat du code au 2026-09-08 (les parcours UI et l'acheminement réel des emails
-restent à valider en navigateur avant rendu).
-
-Implémenté :
-
-- layout header/main/footer, styles responsive et Docker Compose ;
-- inscription, hash du mot de passe, validation email, connexion et déconnexion ;
-- mot de passe oublié, lien email temporaire et réinitialisation à usage unique ;
-- protection CSRF, encodage du pseudo, sessions et configuration DB via `.env` ;
-- studio privé, webcam, upload PNG/JPEG, filtres alpha et aperçu en direct ;
-- composition finale serveur, sauvegarde et miniatures des créations ;
-- suppression réservée au propriétaire ;
-- galerie publique triée par date, likes/commentaires pour les utilisateurs connectés.
-
-Mandatory restant :
-
-- route et logique profil : modification username/email/password ;
-- notification email de commentaire et préférence enregistrée, active par défaut ;
-- pagination galerie minimum 5 par page (actuellement limitée aux 30 premiers résultats) ;
-- désactiver la capture webcam tant qu'aucun cadre/sticker n'est sélectionné ;
-- nettoyage des logs et messages d'erreur, validation complète sécurité/responsive/navigateurs.
-
-Avant publication, traiter aussi les anciens secrets et sauvegardes éventuellement
-présents dans l'historique Git. Une page 404 dédiée serait une amélioration utile.
-
-
-## 12. Points d'attention avant toute modification
-
-- Ne pas ajouter de framework JS.
-- Ne pas faire la generation finale uniquement en JS : le sujet exige le serveur.
-- Ne pas faire confiance aux chemins de fichiers envoyes par le navigateur.
-- Les filtres doivent rester des PNG avec transparence.
-- Pour les filtres :
-  - `frame` = fixe plein cadre ;
-  - `sticker` = deplacable/redimensionnable.
-- Si on ajoute une page privee, mettre `public => false` dans `routes.php`.
-- Si on ajoute une page dans le footer/header, verifier qu'une route existe.
-- Si on touche la camera, verifier mobile + HTTPS local.
-- Si on touche aux mails, verifier msmtp + `.env`.
-- Si on touche aux formulaires, valider cote client ET cote serveur.
-- Si on touche a SQL, utiliser PDO prepare.
-- Si on touche aux images upload, verifier MIME, taille, extension et traitement serveur.
-- Si on touche a la session, ne pas casser l'acces AJAX du routeur.
-- Si on touche a `style.css`, verifier le rendu mobile : header, footer, boutons, studio carre.
-
-
-## 13. Notes pratiques recuperees depuis l'ancien README
-
-Cette section regroupe les notes operationnelles qui etaient dans `readme.md`, afin que
-le README reste une synthese courte et que les details techniques restent ici.
-
-### Consulter la DB
-
-Depuis `camagru/` :
+Pour consulter la base sans placer le secret dans la commande :
 
 ```bash
 docker compose exec db mariadb -u root -p
 ```
 
-Mot de passe : valeur de `MYSQL_ROOT_PASSWORD` dans votre fichier local `camagru/.env`.
+Saisir le mot de passe local, puis sélectionner la base configurée et exécuter `SHOW TABLES;`. Conserver les sauvegardes hors Git. Le dump a été retiré de tous les commits locaux réécrits puis restauré comme copie privée ignorée, avec permissions 600. Les montages générés sont également ignorés ; seul `public/uploads/photos/.gitkeep` reste versionné.
 
-Commandes SQL utiles :
+## 8. Contrôle de chaque exigence du sujet 4.1
 
-```sql
-USE camagru;
-SHOW TABLES;
-SELECT id, username, email, is_verified, token FROM users;
-SELECT photo_id, user_id, path, created_at FROM photos ORDER BY photo_id DESC;
-EXIT;
-```
+**Légende :** « Vérifié » indique une preuve par lecture/test pour ce périmètre ; « Partiel » indique des contrôles complémentaires nécessaires ; « Écart » indique un point qui empêche de déclarer le projet intégralement conforme. Les tests ne constituent pas une preuve d’absence absolue de vulnérabilité.
 
-En une commande :
+### Instructions générales — chapitre IV, page 5
 
-```bash
-docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" "$@"' sh -e "SHOW TABLES;"
-```
+| Exigence | État | Preuve ou réserve |
+| --- | --- | --- |
+| Organisation libre, cohérente | Vérifié | MVC maison, routeur central, services et documentation. |
+| Aucune erreur, warning ou ligne de log dans les consoles client/serveur, hors exception HTTPS/getUserMedia | Vérifié | Traces retirées du routeur, de l’inscription, du studio, de la connexion et de la galerie ; `flowLog()` et les `error_log()` applicatifs ont été supprimés. PHP n’affiche ni ne journalise publiquement ses erreurs. Les 322 vérifications PHP et le scénario Chrome de galerie infinie passent sans warning, erreur fatale ou trace applicative. Une panne PDO simulée renvoie uniquement une réponse générique HTML/JSON. |
+| Fonctions serveur avec équivalent PHP standard | Vérifié par inspection | PHP, PDO, GD, mbstring, sessions et mail ; pas de framework serveur tiers identifié. |
+| Client HTML/CSS/JavaScript, APIs natives seulement | Vérifié par inspection | Modules du projet, fetch, canvas, caméra, IntersectionObserver ; aucun JS tiers importé. |
+| Framework CSS autorisé sans JS interdit | Vérifié | Bootstrap CSS et icônes uniquement. Dépendance réseau CDN à garder en tête pour la soutenance. |
+| Conteneurisation et déploiement en une commande | **Partiel** | Dockerfile, Compose, `make start` présents ; conteneurs opérationnels. Démarrage à froid sur une machine vierge à rejouer, attente DB fixe. |
+| Absence de fuite de sécurité | **Garanties partielles** | Les scénarios applicatifs testés passent. Les historiques local et distant sont assainis, le secret DB a été renouvelé et les erreurs techniques ne sont plus exposées. Les autres contrôles finaux de cette liste restent à terminer. |
+| Firefox ≥41 et Chrome ≥46 | **Partiel ; minima historiques non supportés par le code actuel** | Galerie rendue sur Firefox 154.0.1 et Chrome 152.0.7977.82. Modules ES, import dynamique, async/await, chaînage optionnel et autres fonctionnalités modernes empêchent de revendiquer Firefox 41/Chrome 46. Aucun test des versions minimales. |
+| Secrets dans `.env` local ignoré, aucun identifiant publié | Vérifié après correction | `.env`, sauvegardes et montages sont ignorés ; l’ancien secret DB a été remplacé et retiré des 12 commits locaux, puis l’historique a été publié avec `--force-with-lease`. Aucun secret n’est reproduit dans ce rapport. |
 
-### Backups DB
+### Fonctionnalités communes — V.1, page 6
 
-Creer un dump :
+| Exigence | État | Preuve ou réserve |
+| --- | --- | --- |
+| Header, main, footer | Vérifié | `layout.php`, header/footer communs. |
+| Mobile et petites résolutions | Partiel | CSS responsive et adaptation du shell ; galerie inspectée à 390×844 sur Chrome et 1280×900 sur Firefox. Studio connecté, formulaires et rotations sur appareil tactile à compléter. |
+| Validation correcte des formulaires | Vérifié sur les cas testés | `Validation`, `Security`, contrôleurs ; tests de types, formats, tailles, mots de passe et paramètres invalides. |
+| Pas de mots de passe en clair en BDD | Vérifié pour les comptes applicatifs | Hash `password_hash`, vérification dédiée ; ne pas confondre avec les anciens secrets de connexion DB dans Git. |
+| Protection contre HTML/JS injecté | Vérifié sur les cas testés | Encodage PHP, JSON sécurisé, textContent et contrôle des URLs ; suite DOM XSS. |
+| Pas d’upload indésirable | Vérifié sur les cas testés | Contenu PNG/JPEG contrôlé, limites de taille/dimensions et réencodage GD vers un nom serveur. |
+| Pas d’altération de requête SQL | Vérifié par inspection et cas invalides | Données liées par PDO, limites/cursors validés, fragments SQL construits depuis des choix serveur. |
+| Pas de modification privée depuis un formulaire externe | Vérifié | Sessions, contrôle des routes, propriétaire côté SQL et CSRF de tous les POST. |
 
-```bash
-cd camagru
-mkdir -p backups
-docker compose exec -T db sh -c 'exec mariadb-dump -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"'  > backups/camagru.sql
-```
+### Utilisateurs — V.2, page 7
 
-Restaurer un dump :
+| Exigence | État | Preuve ou réserve |
+| --- | --- | --- |
+| Inscription avec email valide, pseudo et mot de passe complexe | Vérifié | Contrôleur, contraintes UNIQUE et tests HTTP. |
+| Confirmation par lien unique envoyé par email | Partiel | Création/envoi capturé, confirmation POST et usage unique testés ; réception SMTP réelle à vérifier. |
+| Connexion pseudo/mot de passe | Vérifié | Compte activé requis, hash vérifié et session renouvelée. |
+| Email de réinitialisation en cas d’oubli | Partiel | Parcours, expiration, remplacement et usage unique testés ; livraison SMTP réelle à vérifier. |
+| Déconnexion en un clic depuis chaque page | Vérifié par code et test HTTP | Bouton POST permanent dans le header des pages connectées ; CSRF sans étape de confirmation. |
+| Modifier pseudo/email/mot de passe | Vérifié | Profil privé, tests AJAX/POST classique, doublons et concurrence. |
 
-```bash
-cd camagru
-docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" "$@"' sh < backups/camagru.sql
-```
+### Galerie — V.3, page 7
 
-### Volume MariaDB persistant
+| Exigence | État | Preuve ou réserve |
+| --- | --- | --- |
+| Galerie publique de toutes les créations | Vérifié | Route publique, pas de filtre propriétaire, lots parcourables jusqu’à la fin. |
+| Classement par date de création | Vérifié | Modes OFFSET et infini triés par `created_at DESC, photo_id DESC`. Le curseur composé date/identifiant est couvert lorsque l’ordre des dates diffère de celui des IDs et lorsque plusieurs dates sont identiques. |
+| Likes/commentaires réservés aux connectés | Vérifié | Vérification serveur, CSRF, contraintes FK/PK et tests. |
+| Email à l’auteur lorsqu’un commentaire est ajouté | Partiel | Message capturé au bon destinataire et tests de panne SMTP ; réception réelle non testée. |
+| Préférence email vraie par défaut et désactivable | Vérifié | Schéma, migration 002, profil et tests opt-out/opt-in. |
+| Pagination avec au moins cinq éléments par page | Vérifié | Lots de cinq dans le flux infini ; dernier lot éventuellement incomplet. Le défilement infini est explicitement proposé comme bonus par le sujet. |
 
-Le service MariaDB utilise un volume Docker nomme :
+### Édition — V.4, page 8 et objectif page 4
 
-```yaml
-volumes:
-  - db_data:/var/lib/mysql
-```
+| Exigence | État | Preuve ou réserve |
+| --- | --- | --- |
+| Studio privé, refus poli pour visiteur | Vérifié | Redirection login ou réponse AJAX 403, tests d’accès. |
+| Section principale : aperçu webcam, filtres, capture | Vérifié par code | Vue studio et module de capture ; test caméra matérielle restant. |
+| Section latérale de miniatures des créations précédentes | Vérifié par code | `photo_mine`, bibliothèque et visionneuse du studio. Présentation responsive à valider sur appareil réel. |
+| Images superposables sélectionnables avec canal alpha | Vérifié | Manifeste, sélection des calques et en-têtes alpha des 11 PNG. |
+| Capture non cliquable tant qu’aucun filtre n’est sélectionné | Vérifié par code | Bouton initialement disabled ; condition caméra + dimensions vidéo + filtre ; garde supplémentaire dans l’événement de capture. |
+| Montage final effectué côté serveur | Vérifié | GD dans `PhotoComposer`, tests de création de PNG 1024×1024. |
+| Upload possible sans webcam | Vérifié par code et traitement serveur | Sélecteur de fichier indépendant, recadrage et validation PNG/JPEG ; parcours tactile à compléter. |
+| Supprimer uniquement ses propres créations | Vérifié | DELETE autorisé par propriétaire, tests autres comptes/double suppression/concurrence. |
 
-Compose le nomme effectivement `camagru_db_data`.
+### Contraintes, bonus et rendu — V.5, VI et VII, pages 9–12
 
-Avant cet ajout, les donnees MariaDB etaient stockees dans `/var/lib/mysql` via des
-volumes Docker anonymes crees par l'image MariaDB. Ces volumes pouvaient survivre a un
-simple `docker compose down`, mais ils etaient difficiles a identifier et pouvaient etre
-remplaces par un nouveau volume au prochain cycle Docker Compose.
+| Exigence ou bonus | État |
+| --- | --- |
+| Langages/frameworks autorisés et conteneur de déploiement | Voir contrôles généraux ; pas de framework JS interdit trouvé. |
+| Échanges AJAX | Implémentés et testés pour navigation, galerie, interactions, profil et studio. |
+| Aperçu en direct du résultat sur la webcam | Implémenté côté navigateur ; validation matérielle finale restante. |
+| Pagination infinie | Implémentée et testée ; corriger son tri pour satisfaire le mandatory. |
+| Partage sur réseaux sociaux | Non implémenté ; optionnel. |
+| GIF animé | Non implémenté ; optionnel. |
+| Autres bonus cohérents | Recherche par hashtag, recadrage, transformation et empilement de stickers ; valeur à apprécier par l’évaluateur. |
+| Bonus seulement si mandatory parfait | **Pas encore validable**, compte tenu des écarts ci-dessus. |
+| Remise dans le dépôt Git | **À finaliser** : modifications non commitées et nouveaux fichiers non suivis, notamment les tests de concurrence/curseur et le rapport associé au moment du contrôle. Rien n’a été commité ni poussé par cette mise à jour documentaire. |
 
-Les fichiers PNG generes sont, eux, stockes dans le dossier projet :
+## 9. Vérifications exécutées et limites
 
-```text
-camagru/src/public/uploads/photos/
-```
+- Lecture complète du sujet PDF 4.1, en particulier chapitres IV à VII, puis confrontation au code.
+- Nouvelle exécution de `docker compose exec -T app php tests/security.php` : **322 vérifications réussies**, base temporaire distincte et aucun email externe envoyé.
+- Suites DOM Chrome XSS et défilement infini validées lors de la mise en place du flux actuel. Elles couvrent affichage sécurisé, curseurs, ajout des lots, erreurs/reprise, filtres, visionneuse et sortie de page.
+- Galerie réelle inspectée visuellement sur Chrome 152.0.7977.82 à 390×844 et Firefox 154.0.1 à 1280×900. Cela confirme ce rendu public, pas l’ensemble des parcours privés sur ces navigateurs.
+- Contrôle alpha des 11 PNG du manifeste ; inspection des imports : Bootstrap CSS/icônes, modules locaux, pas de bibliothèque JS tierce.
+- Réécriture des 12 commits locaux : dump, montages générés et anciens identifiants DB retirés. Références de sauvegarde/reflogs supprimés, objets élagués et ancien secret MariaDB renouvelé. Analyse des 203 blobs encore accessibles et recherche de motifs courants de clés privées/tokens sans résultat. Ce contrôle ne remplace pas un outil spécialisé ni la révocation d’un secret publié.
+- `camagru/backups/camagru-before-db-volume-2026-09-07.sql` existe uniquement comme copie privée locale ignorée, avec permissions 600. `public/uploads/photos` est ignoré sauf `.gitkeep`. La branche GitHub distante a été remplacée par l’historique assaini avec `--force-with-lease`.
+- Conteneurs `app`/`db` en fonctionnement ; pas de destruction/recréation du volume utilisateur pour simuler une première installation.
 
-Ils peuvent donc survivre meme si les lignes correspondantes de la DB ont disparu.
+Les tests de concurrence démarrent plusieurs processus PHP/PDO indépendants. Les tests HTTP utilisent un serveur local avec capture des mails. Ils ne prouvent pas la réception dans une boîte externe, le fonctionnement d’une webcam réelle, la compatibilité des anciens navigateurs, ni une sécurité absolue.
 
-### Ajouter un sticker
+## 10. Travaux avant rendu, par priorité
 
-Un sticker doit exister a deux endroits :
+1. **Informer les éventuels collaborateurs de la réécriture.** Les historiques local et GitHub sont assainis et la rotation MariaDB est terminée. Les autres clones doivent repartir de cette nouvelle branche avant de contribuer. Le secret SMTP actuel n’a pas été retrouvé dans l’historique analysé et n’a pas été renouvelé.
+2. **Fixer et vérifier la cible navigateur.** Les versions actuelles rendent la galerie ; les versions minimales citées ne peuvent pas être revendiquées avec la syntaxe actuelle. Le périmètre demandé doit être respecté lors du rendu, pas déduit des seuls tests Chrome récents.
+3. **Effectuer les essais matériels et SMTP finaux** : inscription reçue, reset reçu, notification de commentaire avec préférence activée puis désactivée ; caméra/import, capture bloquée sans filtre, enregistrement puis studio vierge, arrêt caméra à la sortie ; navigation et formulaires sur téléphone portrait/paysage et Firefox/Chrome.
+4. **Rejouer le démarrage sur environnement vierge isolé**, vérifier DB prête et uploads accessibles, puis vérifier les fichiers du commit remis. Ne pas utiliser `make reset` sur les données de travail pour cet essai.
 
-- dans `camagru/src/public/images/filters/filters.json`, pour etre affiche dans la page `studio` ;
-- dans la table `stickers`, pour etre accepte par le backend au moment de creer le montage.
-
-#### 1. Ajouter le fichier image
-
-Placer le PNG transparent dans :
-
-```text
-camagru/src/public/images/filters/stickers/
-```
-
-Regles conseillees :
-
-- format PNG avec canal alpha ;
-- fond transparent reel, pas un damier dessine dans l'image ;
-- nom en kebab-case, par exemple `chat-noir-sticker.png` ;
-- dimensions connues, car elles sont stockees en base pour garder le ratio du sticker.
-
-#### 2. Ajouter l'entree dans `filters.json`
-
-Exemple :
-
-```json
-{
-  "id": "chat-noir-sticker",
-  "name": "Chat noir",
-  "file": "/images/filters/stickers/chat-noir-sticker.png",
-  "type": "sticker"
-}
-```
-
-Important :
-
-- `id` doit etre unique ;
-- `type` doit valoir `sticker` ;
-- `file` est le chemin public utilise par le front ;
-- ce fichier sert seulement au chargement visuel des filtres dans le studio.
-
-#### 3. Ajouter le sticker en base
-
-Ajouter aussi le sticker dans le bloc `INSERT INTO stickers` de :
-
-```text
-camagru/src/database/init.sql
-```
-
-Exemple :
-
-```sql
-('chat-noir-sticker', 'images/filters/stickers/chat-noir-sticker.png', 1222, 886, 'chat-noir')
-```
-
-Champs :
-
-- `sticker_id` : meme valeur que le `id` du JSON ;
-- `path` : chemin relatif cote serveur, sans slash au debut ;
-- `width` et `height` : dimensions reelles du PNG ;
-- `hashtag` : hashtag ajoute automatiquement aux photos qui utilisent ce sticker.
-
-Le hashtag doit respecter les regles actuelles :
-
-- lettres Unicode et tirets uniquement ;
-- pas de chiffre, pas de `_`, pas de `#` ;
-- pas de tiret au debut ou a la fin ;
-- 25 caracteres maximum.
-
-#### 4. Synchroniser la base deja lancee
-
-Modifier `init.sql` suffit pour une base neuve, mais pas pour la base Docker deja en cours.
-
-Pour ajouter le sticker sans reset la DB :
-
-```sql
-INSERT INTO stickers (sticker_id, path, width, height, hashtag)
-VALUES ('chat-noir-sticker', 'images/filters/stickers/chat-noir-sticker.png', 1222, 886, 'chat-noir')
-ON DUPLICATE KEY UPDATE
-    path = VALUES(path),
-    width = VALUES(width),
-    height = VALUES(height),
-    hashtag = VALUES(hashtag),
-    is_active = TRUE;
-```
-
-Depuis le terminal :
-
-```bash
-cd camagru
-docker compose exec db mariadb -u root -p
-```
-
-Puis entrer le mot de passe, selectionner la base et executer la requete :
-
-```sql
-USE camagru;
-```
-
-#### 5. Verifier
-
-Verifier que le sticker est actif :
-
-```sql
-SELECT sticker_id, path, width, height, hashtag, is_active
-FROM stickers
-WHERE sticker_id = 'chat-noir-sticker';
-```
-
-Verifier aussi que `filters.json` est un JSON valide avant de relancer/tester le studio.
-
-### Camera et HTTPS
-
-Les navigateurs modernes autorisent `getUserMedia()` seulement depuis une origine
-securisee.
-
-OK en local :
-
-- `http://localhost:8081`
-- `http://127.0.0.1:8081`
-- `https://localhost:8443`
-
-Souvent bloque :
-
-- `http://192.168.x.x:8081`
-- toute IP reseau en HTTP simple.
-
-Pour tester depuis un telephone ou un autre appareil du reseau, utiliser HTTPS :
-
-```text
-https://<ip-du-pc>:8443
-```
-
-Le certificat local peut devoir etre accepte manuellement dans le navigateur.
+Améliorations distinctes des écarts explicites au sujet : retirer le chmod 777, limiter l’exposition de MariaDB, figer les images Docker, maîtriser les dépendances CSS CDN et prévoir une reprise disque/BDD après incident. Elles ne remplacent pas les corrections mandatory ci-dessus.

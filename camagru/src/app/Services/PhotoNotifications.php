@@ -29,12 +29,10 @@ final class PhotoNotifications {
             $body .= '<p><a href="' . $gallery . '">Voir la galerie</a></p>'
                 . '<p><a href="' . $profile . '">Gérer mes notifications</a></p>';
             $subject = $comment === null ? 'Camagru : nouveau like' : 'Camagru : nouveau commentaire';
-            if (!@mail($recipient['email'], $subject, $body,
-                "From: Camagru <no-reply@camagru.com>\r\nContent-Type: text/html; charset=UTF-8\r\n")) {
-                error_log('Notification Camagru : envoi email impossible.');
-            }
+            @mail($recipient['email'], $subject, $body,
+                "From: Camagru <no-reply@camagru.com>\r\nContent-Type: text/html; charset=UTF-8\r\n");
         } catch (Throwable $e) {
-            error_log('Notification Camagru : traitement impossible.');
+            return;
         }
     }
 }

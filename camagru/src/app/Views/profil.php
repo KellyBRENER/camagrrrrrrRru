@@ -17,6 +17,8 @@ unset($_SESSION['profile_notice']);
             <h3>Informations personnelles</h3>
             <form id="updateProfileForm" action="/?page=profile_update" method="POST">
                 <?php echo Security::csrfField(); ?>
+                <input type="hidden" name="original_username" value="<?php echo htmlspecialchars($profile['username'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
+                <input type="hidden" name="original_email" value="<?php echo htmlspecialchars($profile['email'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
                 <div class="mb-3">
                     <label for="profileUsername" class="form-label">Pseudo</label>
                     <input id="profileUsername" type="text" name="username" class="form-control" maxlength="50" autocomplete="username" value="<?php echo htmlspecialchars($profile['username'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>" required>

@@ -41,6 +41,7 @@ function csrf($html) {
     return $match[1];
 }
 try {
+    require __DIR__ . '/origin_cases.php';
     $sql = file_get_contents(__DIR__ . '/../database/init.sql');
     $sql = str_replace(['CREATE DATABASE IF NOT EXISTS camagru', 'USE camagru;'], ["CREATE DATABASE `$dbName`", "USE `$dbName`;"], $sql);
     $sql = str_replace("    email_notifications BOOLEAN NOT NULL DEFAULT TRUE,\n", '', $sql);
@@ -64,6 +65,7 @@ try {
     file_put_contents($temp . '/capture.php', '<?php if (is_file(getenv("TEST_MAIL_PATH") . ".fail")) exit(1); file_put_contents(getenv("TEST_MAIL_PATH"), stream_get_contents(STDIN));');
     putenv('MYSQL_DATABASE=' . $dbName);
     putenv('APP_URL=http://localhost:8081');
+    putenv('APP_ALLOWED_ORIGINS=http://allowed.example.invalid:8081');
     putenv('TEST_MAIL_PATH=' . $temp . '/mail.txt');
     $socket = stream_socket_server('tcp://127.0.0.1:0');
     $port = (int) substr(strrchr(stream_socket_get_name($socket, false), ':'), 1);
@@ -101,6 +103,15 @@ try {
     $visitor = [];
     [$status, $html, $headers] = request('/?page=login', $visitor);
     $csrf = csrf($html);
+    foreach (['allowed.example.invalid:8081' => 'http://allowed.example.invalid:8081',
+        'attacker.invalid' => 'http://localhost:8081'] as $mailHost => $expectedOrigin) {
+        request('/?page=resend_validation', $visitor,
+            ['csrf_token' => $csrf, 'email' => 'pending@example.invalid'], ['Host: ' . $mailHost]);
+        $verificationMail = file_get_contents($temp . '/mail.txt');
+        check(str_contains($verificationMail, $expectedOrigin . '/?page=verify')
+            && !str_contains($verificationMail, 'attacker.invalid'),
+            'Email de validation : origine autorisée ou repli sûr (' . $mailHost . ')');
+    }
     check($status === 200 && stripos($headers, 'HttpOnly') !== false && stripos($headers, 'SameSite=Lax') !== false, 'Cookies de session protégés');
     check(request('/?page=login', $visitor, ['username' => 'tester', 'password' => 'Original123!'])[0] === 403, 'Connexion sans CSRF refusée');
     foreach (['photo_create', 'photo_delete', 'photo_like_toggle', 'photo_comment_add', 'register', 'forgot_password', 'reset_password', 'resend_validation'] as $route) {
@@ -151,9 +162,11 @@ try {
         check(request('/?page=' . $route, $visitor)[0] === 405, $route . ' refuse les modifications par GET');
     }
     require __DIR__ . '/validation_cases.php';
+    require __DIR__ . '/concurrency_cases.php';
     require __DIR__ . '/profile_cases.php';
     require __DIR__ . '/notification_cases.php';
     require __DIR__ . '/pagination_cases.php';
+    require __DIR__ . '/cursor_cases.php';
     $oldSession = $visitor;
     $resetClient = [];
     [, $html] = request('/?page=forgot_password', $resetClient);
@@ -161,7 +174,7 @@ try {
     [$status, , $headers] = request('/?page=forgot_password', $resetClient, ['csrf_token' => $resetCsrf, 'email' => 'tester@example.invalid'], ['Host: attacker.invalid']);
     check($status === 303 && str_contains($headers, 'sent=1'), 'Demande de réinitialisation acceptée');
     $mail = file_get_contents($temp . '/mail.txt');
-    check(str_contains($mail, 'http://localhost:8081/') && !str_contains($mail, 'attacker.invalid'), 'Lien email construit depuis APP_URL, pas depuis Host');
+    check(str_contains($mail, 'http://localhost:8081/') && !str_contains($mail, 'attacker.invalid'), 'Host non autorisé : lien email construit depuis APP_URL');
     preg_match('/token=([a-f0-9]{64})/', $mail, $match);
     $token = $match[1];
     $stored = $pdo->query('SELECT token_hash, TIMESTAMPDIFF(SECOND, NOW(), expires_at) AS lifetime FROM password_resets')->fetch();

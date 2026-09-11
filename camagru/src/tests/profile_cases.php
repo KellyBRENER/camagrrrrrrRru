@@ -26,6 +26,7 @@ foreach (['profile_update', 'password_update'] as $route) {
 }
 $profileValid = ['username' => 'profile-updated', 'email' => 'updated@example.invalid', 'current_password' => 'ProfileOld123!', 'csrf_token' => $profileCsrf];
 $profileOriginal = $model->getById($profileUserId);
+$profileValid += ['original_username' => $profileOriginal['username'], 'original_email' => $profileOriginal['email']];
 foreach ([['username' => []], ['username' => str_repeat('a', 51)], ['username' => '<img src=x onerror=alert(1)>'],
     ['email' => []], ['email' => 'invalid'], ['email' => str_repeat('a', 95) . '@example.invalid'],
     ['current_password' => []], ['current_password' => 'wrong'], ['username' => 'tester'], ['email' => 'tester@example.invalid']] as $override) {
@@ -46,6 +47,7 @@ check(str_contains($html, 'Vos informations ont été mises à jour.') && str_co
 [, $html] = request('/?page=home', $profileOtherSession);
 check(str_contains($html, 'profile-updated'), 'Pseudo actualisé dans les autres sessions');
 $profileValid = ['username' => 'profile-updated', 'email' => 'updated@example.invalid', 'current_password' => 'ProfileOld123!', 'csrf_token' => $profileCsrf];
+$profileValid += ['original_username' => 'profile-updated', 'original_email' => 'updated@example.invalid'];
 [$code, , $headers] = request('/?page=profile_update', $profileClient, $profileValid);
 check($code === 303 && str_contains($headers, 'Location: /?page=profil'), 'Formulaire sans AJAX et mise à jour inchangée fonctionnels');
 [, $html] = request('/?page=profil', $profileClient);

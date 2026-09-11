@@ -72,6 +72,27 @@ final class Security {
             || isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) {
             throw new RuntimeException('APP_URL invalide.');
         }
+        // Only trust the direct connection and an explicitly allowed Host.
+        // Forwarded headers, Origin and Referer do not select email destinations.
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        $scheme = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http';
+        if (is_string($host) && $host !== '') {
+            $origin = $scheme . '://' . strtolower($host);
+            foreach (explode(',', getenv('APP_ALLOWED_ORIGINS') ?: '') as $allowed) {
+                $allowed = rtrim(strtolower(trim($allowed)), '/');
+                $allowedParts = parse_url($allowed);
+                if (!$allowedParts || !filter_var($allowed, FILTER_VALIDATE_URL)
+                    || !in_array($allowedParts['scheme'] ?? '', ['http', 'https'], true)
+                    || isset($allowedParts['user']) || isset($allowedParts['pass'])
+                    || isset($allowedParts['path']) || isset($allowedParts['query'])
+                    || isset($allowedParts['fragment'])) {
+                    continue;
+                }
+                if ($origin === $allowed) {
+                    return $allowed;
+                }
+            }
+        }
         return $url;
     }
 }
