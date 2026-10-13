@@ -652,10 +652,12 @@ body.app-shell {
 
 .studio-photo-viewer {
     width: min(720px, 100%);
+    max-height: calc(100dvh - 56px);
     display: flex;
     flex-direction: column;
     gap: 16px;
     padding: clamp(16px, 3vw, 24px);
+    overflow-y: auto;
     background: linear-gradient(145deg, #f5e6d3 0%, #e8d4a7 100%);
     border: 3px solid var(--savane-brown);
     border-radius: 12px;
@@ -1670,4 +1672,162 @@ a:hover {
 
 .leopard-bar h1, .leopard-bar a {
     text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.9);
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+    body.app-shell {
+        --shell-content-pad-y: 4px;
+        --shell-header-pad-y: 2px;
+        --shell-header-pad-x: 10px;
+        --shell-title-size: 0.9rem;
+        --shell-title-spacing: 0.5px;
+        --shell-header-btn-pad-y: 2px;
+        --shell-header-btn-pad-x: 7px;
+        --shell-header-btn-font-size: 0.72rem;
+        --shell-footer-link-pad-y: 3px;
+        --shell-footer-icon-size: 1rem;
+        --shell-footer-active-scale: 1.08;
+    }
+
+    .app-shell > header.leopard-bar,
+    .app-shell > footer.leopard-bar {
+        border-top-width: 1px;
+        border-bottom-width: 1px;
+    }
+
+    .app-shell > header .navbar-brand {
+        padding-top: 0;
+        padding-bottom: 0;
+        line-height: 1.15;
+    }
+
+    .app-shell > header .btn {
+        min-height: 32px;
+        line-height: 1.1;
+    }
+
+    .app-shell > footer .nav-link-leopard {
+        min-height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+    }
+
+    .studio-crop-modal:has(.studio-photo-viewer) {
+        padding: 6px;
+    }
+
+    .studio-photo-viewer {
+        box-sizing: border-box;
+        max-height: calc(100dvh - 12px);
+        gap: 4px;
+        padding: 6px;
+    }
+
+    .studio-photo-viewer .studio-crop-header h3 {
+        font-size: 1rem;
+    }
+
+    .studio-photo-viewer .studio-crop-header p {
+        margin-top: 0;
+        font-size: 0.75rem;
+    }
+
+    .studio-photo-viewer .studio-crop-close {
+        width: 30px;
+        height: 30px;
+        flex-basis: 30px;
+        font-size: 1.25rem;
+    }
+
+    .studio-photo-viewer-frame {
+        width: min(100%, 620px, calc(100dvh - 88px));
+        flex: 0 0 auto;
+    }
+
+    .studio-photo-nav {
+        width: 34px;
+        height: 34px;
+        font-size: 1.5rem;
+    }
+}
+
+@media (orientation: landscape) and (max-height: 560px) and (max-width: 1024px) {
+    .gallery-intro,
+    .gallery-search-panel {
+        margin: 6px 0;
+        padding: 8px 12px;
+    }
+
+    .gallery-intro h2,
+    .gallery-search-panel h3 {
+        margin-bottom: 4px;
+        padding-bottom: 3px;
+        font-size: 1rem;
+    }
+
+    .gallery-intro p {
+        margin-bottom: 0;
+        font-size: 0.8rem;
+    }
+
+    .gallery-search-panel {
+        gap: 5px;
+    }
+
+    .gallery-search-form {
+        gap: 6px;
+    }
+
+    .gallery-search-form .form-control {
+        flex-basis: 150px;
+        padding: 5px 8px;
+    }
+
+    .gallery-search-form .btn-savane,
+    .gallery-search-form .btn-savane-secondary {
+        padding: 5px 10px;
+        font-size: 0.8rem;
+    }
+
+    .gallery-hashtag-suggestions {
+        min-height: 0;
+        max-height: 50px;
+    }
+
+    .gallery-search-status {
+        min-height: 0;
+    }
+
+    .gallery-grid {
+        grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+        gap: 10px;
+    }
+
+    .gallery-card {
+        padding: 7px;
+    }
+
+    .gallery-photo-wrap {
+        border-width: 2px;
+    }
+
+    .gallery-meta {
+        flex-wrap: wrap;
+        gap: 2px 6px;
+        margin-top: 5px;
+        font-size: 0.75rem;
+    }
+
+    .gallery-actions {
+        gap: 6px;
+        margin-top: 6px;
+    }
+
+    .gallery-action {
+        min-width: 0;
+        flex: 1;
+        padding: 5px 4px;
+    }
 }

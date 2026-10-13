@@ -1,4 +1,4 @@
-<div class="savane-card">
+<div class="savane-card gallery-intro">
     <h2><span class="paw-print">🖼️</span> Galerie de la savane</h2>
     <p>Découvrez les créations félines de notre communauté !</p>
 </div>

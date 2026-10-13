@@ -5,3 +5,5 @@
 .env.*
 !.env.example
 /camagru/backups/
+/camagru/src/public/uploads/photos/*
+!/camagru/src/public/uploads/photos/.gitkeep
