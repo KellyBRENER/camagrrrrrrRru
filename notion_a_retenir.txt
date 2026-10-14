@@ -1,0 +1,133 @@
+Voici la fiche de rappel de ce qu’on a révisé, adaptée à ton Camagru.
+
+### Architecture et parcours d’une requête
+
+**Apache reçoit les requêtes HTTP ; PHP exécute les traitements de l’application.** Apache peut servir directement les fichiers statiques : images, CSS et JavaScript.
+
+Pour une demande traitée par PHP : `index.php` initialise la session et les contrôles communs, le routeur choisit le contrôleur, puis celui-ci utilise les modèles et services avant de renvoyer du HTML ou du JSON.
+
+| Dossier | Responsabilité |
+|---|---|
+| `Controllers` | Vérifier la demande et coordonner le traitement |
+| `Models` | Lire et modifier les données en base |
+| `Views` | Produire le HTML |
+| `Core` | Fournir les mécanismes communs : routage, sécurité, validation |
+| `Services` | Effectuer des traitements spécialisés : composition photo, notifications |
+
+**MVC définit des responsabilités, pas une obligation de n’avoir que trois dossiers.**
+
+### Docker et stockage
+
+Deux services : **`app` pour Apache/PHP**, **`db` pour MariaDB**.
+
+| Contenu | Stockage |
+|---|---|
+| Comptes, chemins des photos, likes, commentaires, hashtags | MariaDB, dans le volume `db_data` |
+| Cadres, stickers et leur manifeste | Fichiers suivis par Git dans `images/filters/` |
+| Montages publiés | PNG dans `uploads/photos/{user_id}/` |
+
+- Un **volume nommé** est géré par Docker et conserve les données indépendamment du conteneur.
+- Un **bind mount** partage un dossier de ton ordinateur avec le conteneur : ici `./src`.
+- Supprimer les conteneurs ne supprime pas ces données.
+- Supprimer le volume MariaDB ne supprime pas les PNG du dossier hôte.
+- Une sauvegarde complète doit couvrir **la base et les photos**.
+
+Un clone apporte le code, les cadres/stickers et les scripts SQL. `make start` initialise les tables et les neuf stickers en base, **sans créer de comptes ni de montages de démonstration**.
+
+### Authentification et session
+
+**Authentification : qui es-tu ? Autorisation : as-tu le droit d’effectuer cette action ?**
+
+À la connexion, le serveur vérifie les identifiants et l’activation du compte, renouvelle l’identifiant de session et enregistre notamment `user_id` dans `$_SESSION`.
+
+- Le **navigateur conserve le cookie contenant l’identifiant de session**.
+- Le **serveur conserve les données de session**.
+- `is_verified` signifie « compte activé », pas « utilisateur connecté ».
+- Ton contrôleur utilise le `user_id` de la session et ignore un éventuel `user_id` envoyé par le navigateur.
+- Pour supprimer une photo, le modèle impose **`photo_id` ET `user_id`**.
+- Renouveler l’identifiant après connexion protège contre la **fixation de session**.
+- `password_version` permet d’invalider les anciennes sessions après un changement de mot de passe, lors de leur prochaine requête.
+
+### Mots de passe et jetons
+
+**Chiffrement : réversible avec une clé. Hachage : pas d’opération de déchiffrement.**
+
+- `password_hash()` produit le hash enregistré en base.
+- `password_verify()` vérifie le mot de passe fourni contre ce hash.
+- On ne recalcule pas simplement un nouveau `password_hash()` pour comparer les chaînes : le sel aléatoire peut produire des résultats différents.
+- Un hash n’empêche pas les essais de mots de passe : un mot de passe faible reste devinable.
+
+| Jeton | Rôle |
+|---|---|
+| **Activation** | Vérifier l’accès à l’adresse email et activer le compte |
+| **CSRF** | Protéger les actions contre les requêtes provoquées par un autre site |
+| **Récupération** | Autoriser un changement de mot de passe pendant 30 minutes, une seule fois |
+
+Le jeton de récupération est **haché en base** pour éviter qu’une fuite de la base fournisse directement des liens utilisables. Son **usage unique vient de sa suppression après utilisation**, pas du hachage.
+
+### Protections à ne pas confondre
+
+| Risque | Protection |
+|---|---|
+| **Injection SQL** | Requêtes préparées : séparer le SQL des valeurs utilisateur |
+| **XSS** | Afficher les données comme du texte : `textContent` en JS, `htmlspecialchars()` dans le HTML produit par PHP |
+| **CSRF** | Vérifier un jeton imprévisible associé à la session |
+| **Accès aux photos d’autrui** | Contrôler la propriété côté serveur |
+| **Saisies ou uploads invalides** | Valider les données côté serveur |
+
+Ton CSRF est généré avec `random_bytes(32)`, représenté en hexadécimal et conservé dans la session. Il revient par un champ caché ou l’en-tête `X-CSRF-Token`, puis est comparé avec `hash_equals()`.
+
+**Un champ caché est invisible à l’écran, mais consultable dans les outils de développement.** Le CSRF ne prouve pas que la requête vient du JavaScript officiel : il prouve qu’elle possède le jeton attendu.
+
+### Composition des montages et uploads
+
+**L’aperçu navigateur présente des calques ; le serveur fabrique le PNG final avec GD.**
+
+Le navigateur transmet la source, les identifiants des superpositions et leurs paramètres. Le serveur retrouve les fichiers autorisés, recadre, redimensionne, tourne et superpose les images.
+
+Ton `PhotoComposer` contrôle :
+
+- le contenu réel PNG/JPEG et son décodage ;
+- un poids maximal de **10 Mio** ;
+- un maximum de **20 millions de pixels** ;
+- le chemin de sortie.
+
+**L’extension `.jpg` ne garantit pas que le fichier est une image.** Le serveur réencode le résultat au lieu de conserver directement le fichier reçu.
+
+Seul le montage final est conservé ; les positions des calques ne sont pas sauvegardées pour une réédition.
+
+### AJAX et base de données
+
+**`fetch()` envoie la requête ; JSON contient la réponse ; JavaScript actualise le DOM.** Cela permet d’ajouter un commentaire sans recharger toute la galerie. Un formulaire classique peut aussi envoyer une requête, mais charge normalement la réponse comme une nouvelle page.
+
+En base :
+
+- La clé primaire `(photo_id, user_id)` empêche plusieurs likes du même utilisateur sur la même photo.
+- Les clés étrangères garantissent les relations entre données.
+- `ON DELETE CASCADE` supprime les lignes liées, **pas les fichiers PNG**.
+- Une transaction regroupe les modifications SQL : `commit()` valide, `rollBack()` annule.
+- **Le rollback SQL ne supprime pas un fichier sur disque** : ton contrôleur doit le nettoyer séparément.
+
+### Exigences et démonstration
+
+Garde particulièrement en tête :
+
+- Galerie publique, photos triées de la plus récente à la plus ancienne, chargement par lots de cinq.
+- Studio privé, upload possible sans webcam, superposition obligatoire.
+- Notification au **propriétaire de la photo**, activée par défaut et désactivable.
+- Suppression limitée aux propres photos.
+- `.env` exclu de Git ; `.env.example` sans secrets.
+- Bootstrap **CSS** autorisé ; JavaScript fondé sur les API natives.
+- Responsive : disposition adaptée, lisibilité, absence de débordement et interactions utilisables.
+- Vérifications dans la Console, l’onglet Réseau et `make logs`.
+- Un navigateur récent ne prouve pas la compatibilité Firefox 41 / Chrome 46.
+
+**La règle à retenir pour presque toutes les questions de sécurité : le navigateur guide l’utilisateur, mais le serveur impose les règles.** Un bouton désactivé, un champ caché ou une validation JavaScript peuvent être contournés ; les contrôles PHP doivent rester suffisants.
+
+Bonus faits:
+- AJAX : navigation, formulaires et interactions sans rechargement complet.
+- Aperçu en direct des cadres et stickers sur la webcam.
+- Pagination infinie de la galerie, avec un bouton de chargement de secours.
+- Studio avancé : jusqu’à dix stickers, déplacement, redimensionnement, rotation, ordre des calques et recadrage avec zoom.
+- Hashtags : ajout aux montages, suggestions et recherche partielle dans la galerie.
+- Notifications par email pour les likes, en complément des notifications de commentaires obligatoires.

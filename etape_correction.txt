@@ -1,0 +1,137 @@
+Voici un parcours de démonstration pour couvrir le sujet et les fonctionnalités de ton projet. **Prévois deux comptes A et B avec des adresses email accessibles**, deux sessions séparées — navigateur normal et navigation privée, par exemple — et quelques images PNG/JPEG.
+
+Garde la console du navigateur ouverte et lance `make logs` dans un terminal.
+
+### 1. Installation et démarrage
+
+- Depuis un clone neuf, copier `.env.example` vers `.env` et renseigner la configuration.
+- Lancer `make start`.
+- Montrer avec `make ps` que les services `app` et `db` tournent.
+- Ouvrir le site et vérifier que les cadres et stickers sont disponibles.
+- Expliquer qu’un clone neuf ne contient aucun compte ni montage utilisateur.
+
+### 2. Navigation sans connexion
+
+- Ouvrir l’accueil et la galerie sans être connecté.
+- Vérifier que les photos et commentaires sont consultables.
+- Essayer de liker ou commenter : la connexion doit être exigée.
+- Saisir directement l’URL du studio et du profil : l’accès doit être refusé ou redirigé vers la connexion.
+
+### 3. Inscription et activation
+
+- Essayer un formulaire incomplet, un email invalide et un mot de passe trop faible.
+- Créer le compte A avec des valeurs valides.
+- Essayer de se connecter avant activation : connexion refusée.
+- Ouvrir l’email d’activation puis confirmer sur la page.
+- Se connecter avec A.
+- Réutiliser le lien d’activation : il ne doit plus permettre une activation.
+- Essayer une inscription avec le même pseudo ou email : elle doit être refusée.
+- Avec B, tester aussi le renvoi du lien d’activation avant de confirmer le compte.
+
+### 4. Connexion et déconnexion
+
+- Tester un mauvais mot de passe : message d’échec.
+- Tester les bons identifiants d’un compte activé : connexion réussie.
+- Se déconnecter en un clic depuis le studio puis, après reconnexion, depuis une autre page.
+- Après déconnexion, tenter de revenir au studio : accès refusé.
+
+### 5. Studio avec webcam
+
+- Vérifier que le bouton de capture est inactif sans cadre ni sticker.
+- Autoriser la webcam.
+- Sélectionner une superposition et effectuer une capture.
+- Déplacer, redimensionner et tourner un sticker.
+- Combiner cadre et stickers ; modifier leur ordre si l’interface le permet.
+- Publier avec des hashtags.
+- Vérifier que le montage apparaît dans les créations personnelles et dans la galerie.
+- Montrer que le fichier final est un PNG de **1 024 × 1 024 pixels**.
+
+### 6. Studio avec upload
+
+- Importer un JPEG, puis un PNG.
+- Tester le déplacement et le zoom du recadrage.
+- Ajouter une superposition et publier.
+- Refuser l’accès à la webcam ou utiliser un appareil sans webcam : l’upload doit rester utilisable.
+- Essayer un fichier non image renommé en `.jpg` : il doit être refusé.
+- Tester les limites de taille avec un fichier adapté, en tenant compte du traitement effectué par le navigateur avant l’envoi.
+
+### 7. Galerie et hashtags
+
+- Préparer **au moins six montages**, répartis entre A et B.
+- Vérifier l’ordre du plus récent au plus ancien.
+- Faire défiler pour charger le deuxième lot de photos.
+- Vérifier qu’aucune photo n’est répétée.
+- Tester le bouton « Charger plus de photos ».
+- Rechercher un hashtag complet puis partiel.
+- Tester une recherche sans résultat et effacer le filtre.
+
+### 8. Likes, commentaires et emails
+
+- Avec B, liker une photo de A : compteur augmenté.
+- Retirer le like : compteur diminué.
+- Ajouter un commentaire avec B : il apparaît et le compteur augmente.
+- Vérifier que **A reçoit l’email** de notification.
+- Désactiver les notifications dans le profil de A.
+- Ajouter un nouveau commentaire avec B : aucun nouvel email ne doit être reçu par A.
+- Réactiver les notifications.
+- Vérifier que les interactions actualisent l’affichage sans recharger toute la page.
+
+### 9. Profil
+
+- Modifier le pseudo et vérifier son affichage dans la galerie.
+- Modifier l’email avec le mot de passe actuel.
+- Tester un mot de passe actuel incorrect et un pseudo/email déjà utilisé.
+- Changer le mot de passe.
+- Vérifier que l’ancien ne fonctionne plus et que le nouveau fonctionne.
+- Avec A connecté dans une autre session, vérifier que cette ancienne session perd son authentification à sa prochaine requête après le changement de mot de passe.
+
+### 10. Mot de passe oublié
+
+- Demander un lien pour A et ouvrir l’email.
+- Choisir un nouveau mot de passe et se connecter avec.
+- Réutiliser le même lien : il doit être refusé.
+- Tester un jeton inventé : il doit être refusé.
+- Tester un lien expiré après 30 minutes, si tu as préparé ce test.
+- Faire une demande avec une adresse inexistante : le message ne doit pas révéler l’existence du compte.
+
+### 11. Suppression et droits
+
+- Avec A, supprimer une photo de A : disparition du studio et de la galerie.
+- Garder une autre photo de A et noter son `photo_id`.
+- Avec B, envoyer une demande de suppression visant cette photo, avec **la session et le CSRF de B**.
+- Vérifier la réponse **404 « Photo introuvable »** et que la photo de A existe toujours.
+- Revenir sur A et supprimer cette photo : suppression réussie.
+
+### 12. Sécurité
+
+Ces manipulations se font sur ton installation locale avec des données jetables.
+
+| Test | Manipulation | Résultat attendu |
+|---|---|---|
+| **CSRF** | Rejouer un POST en retirant ou modifiant son jeton | Réponse 403, aucune modification |
+| **Validation serveur** | Envoyer directement un commentaire vide ou trop long | Refus, même sans passer par le formulaire |
+| **Superposition obligatoire** | Envoyer une création sans aucun calque | Refus côté serveur |
+| **XSS** | Publier `<script>alert('test')</script>` comme commentaire | Texte affiché, aucun script exécuté |
+| **Injection SQL** | Envoyer du texte ressemblant à du SQL dans un commentaire | Traité comme du texte, aucune modification de la requête |
+| **Identité serveur** | Ajouter un autre `user_id` à une création valide | Photo créée pour l’utilisateur de la session |
+| **Secrets** | Montrer `.gitignore` et `.env.example`, sans ouvrir les secrets | `.env` exclu, exemple sans identifiants réels |
+
+### 13. Responsive et erreurs
+
+- Réduire la largeur du navigateur sur chaque page principale.
+- Vérifier l’absence de débordement horizontal.
+- Tester formulaires, menu, galerie et studio sur téléphone.
+- Vérifier que les boutons et manipulations des stickers restent utilisables au toucher.
+- Surveiller la **Console**, l’onglet **Réseau** et les journaux serveur pendant les parcours.
+- Distinguer les refus attendus des tests de sécurité des erreurs inattendues.
+
+### 14. Persistance et vérifications finales
+
+- Créer une photo et un commentaire.
+- Faire `make down`, puis `make start`.
+- Vérifier que comptes, photos et interactions sont conservés.
+- Lancer `make test-security` et montrer le résultat.
+- **Sur une installation jetable uniquement**, tester le nettoyage par `make reset` si la modification demandée à Codex a bien été appliquée.
+- Tester Firefox 41 et Chrome 46 si tu veux démontrer cette exigence : les versions récentes ne permettent pas de la valider.
+
+**Pour la correction, suis d’abord les parcours utilisateur, puis montre les tests de sécurité.** Prépare à l’avance les six photos et les éventuels liens expirés pour éviter de passer la séance à créer des données ou attendre.

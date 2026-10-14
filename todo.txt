@@ -1,0 +1,10 @@
+mettre une crois rouge au mot de passe quand il ne respecte pas les prérequis
+le lien d'activation doit avoir l'ip, pas le localhost car si pas le même ordi, ne fonctionne pas
+au clic du like, ne pas afficher de sens interdit
+commande pour checker l'état des conteneurs
+quand notif désactivée, la notif est quand même recue pour les likes / mais ne reçoit pas pour les comm
+notif quand déliké ?
+tester la compatibilité avec firefox, sur les anciennes versions
+commandes pour checker la database : 
+    docker compose exec db sh -c 'mariadb --no-defaults --protocol=TCP -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"'
+    SELECT username, password FROM users;
